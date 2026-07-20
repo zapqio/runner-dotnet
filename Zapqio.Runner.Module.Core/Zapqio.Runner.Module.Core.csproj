@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- NuGet Package Settings -->
+    <PackageId>Zapqio.Runner.Module.Core</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Zapqio</Authors>
+    <Company>Hdwr global</Company>
+    <Product>Zapqio Runner Module Lib</Product>
+    <Description>Core interfaces for creating Zapqio Runner modules. Implement IRunnerMethod to create pipeline methods and IRunnerInjection for dependency injection.</Description>
+    <PackageTags>zapqio;runner;pipeline;automation</PackageTags>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <!--<PackageProjectUrl>https://github.com/zapqio/zapqio</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/zapqio/zapqio</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>-->
+
+    <!-- Generate NuGet package on build -->
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+
+    <!-- Include XML documentation -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>
