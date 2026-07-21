@@ -1,5 +1,17 @@
-﻿<Solution>
+<Solution>
+  <Folder Name="/protocol/">
+    <File Path="protocol/PROTOCOL.md" />
+    <File Path="protocol/schemas.json" />
+    <File Path="protocol/fixtures/info.json" />
+    <File Path="protocol/fixtures/job-poll.json" />
+    <File Path="protocol/fixtures/job-dispatch.json" />
+    <File Path="protocol/fixtures/log-info.json" />
+    <File Path="protocol/fixtures/log-error.json" />
+    <File Path="protocol/fixtures/job-return-ok.json" />
+    <File Path="protocol/fixtures/job-return-error.json" />
+  </Folder>
   <Project Path="Zapqio.Runner.Protocol/Zapqio.Runner.Protocol.csproj" />
+  <Project Path="Zapqio.Runner.Protocol.Tests/Zapqio.Runner.Protocol.Tests.csproj" />
   <Project Path="Zapqio.Runner.Module.Core/Zapqio.Runner.Module.Core.csproj" />
   <Project Path="Zapqio.Runner/Zapqio.Runner.csproj" />
 </Solution>

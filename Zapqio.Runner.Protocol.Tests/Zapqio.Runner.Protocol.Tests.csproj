@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    Reference to the language-neutral protocol repository (github.com/zapqio/protocol), pinned as
+    the ./protocol git submodule. PROTOCOL.md, schemas.json and fixtures/ are the source of truth
+    these tests verify Zapqio.Runner.Protocol against. Override with -p:ZapqioProtocolDir=<path>
+    to build against a different checkout.
+  -->
+  <PropertyGroup>
+    <ZapqioProtocolDir Condition="'$(ZapqioProtocolDir)' == ''">$(MSBuildThisFileDirectory)..\protocol\</ZapqioProtocolDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="$(ZapqioProtocolDir)schemas.json"
+             Link="protocol\schemas.json"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ZapqioProtocolDir)fixtures\*.json"
+             Link="protocol\fixtures\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(ZapqioProtocolDir)PROTOCOL.md"
+             Link="protocol\PROTOCOL.md"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <Target Name="EnsureProtocolCheckout" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('$(ZapqioProtocolDir)schemas.json')"
+           Text="Protocol repository not found at '$(ZapqioProtocolDir)'. Run 'git submodule update --init' to fetch it, or build with -p:ZapqioProtocolDir=&lt;path-to-protocol&gt;." />
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="JsonSchema.Net" Version="7.3.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Zapqio.Runner.Protocol\Zapqio.Runner.Protocol.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+</Project>
