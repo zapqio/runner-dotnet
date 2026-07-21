@@ -1,5 +1,5 @@
-<Solution>
-  <Project Path="Zapqio.Protocol/Zapqio.Protocol.csproj" />
+﻿<Solution>
+  <Project Path="Zapqio.Runner.Protocol/Zapqio.Runner.Protocol.csproj" />
   <Project Path="Zapqio.Runner.Module.Core/Zapqio.Runner.Module.Core.csproj" />
   <Project Path="Zapqio.Runner/Zapqio.Runner.csproj" />
 </Solution>

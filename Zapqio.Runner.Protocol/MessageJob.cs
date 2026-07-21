@@ -1,4 +1,4 @@
-﻿namespace Zapqio.Protocol
+﻿namespace Zapqio.Runner.Protocol
 {
     public class MessageJob
     {

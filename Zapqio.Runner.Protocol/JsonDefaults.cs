@@ -1,7 +1,7 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Zapqio.Protocol
+namespace Zapqio.Runner.Protocol
 {
     public static class JsonDefaults
     {

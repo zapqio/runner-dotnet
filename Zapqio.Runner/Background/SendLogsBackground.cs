@@ -1,4 +1,4 @@
-﻿using Zapqio.Protocol;
+﻿using Zapqio.Runner.Protocol;
 
 namespace Zapqio.Runner.Background
 {

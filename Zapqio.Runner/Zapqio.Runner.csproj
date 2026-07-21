@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Worker">
+﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <PropertyGroup>
     <TargetFrameworks>net10.0;net8.0-windows</TargetFrameworks>
@@ -25,7 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Zapqio.Runner.Module.Core\Zapqio.Runner.Module.Core.csproj" />
-    <ProjectReference Include="..\Zapqio.Protocol\Zapqio.Protocol.csproj" />
+    <ProjectReference Include="..\Zapqio.Runner.Protocol\Zapqio.Runner.Protocol.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,5 +1,5 @@
-using Zapqio.Protocol;
-using Zapqio.Protocol.Enums;
+﻿using Zapqio.Runner.Protocol;
+using Zapqio.Runner.Protocol.Enums;
 
 namespace Zapqio.Runner
 {

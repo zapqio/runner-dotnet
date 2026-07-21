@@ -1,4 +1,4 @@
-﻿namespace Zapqio.Protocol.Enums
+﻿namespace Zapqio.Runner.Protocol.Enums
 {
     public enum MessageLogLevel
     {

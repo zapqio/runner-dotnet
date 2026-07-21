@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
-using Zapqio.Protocol;
+﻿using System.Collections.Concurrent;
+using Zapqio.Runner.Protocol;
 
 namespace Zapqio.Runner
 {

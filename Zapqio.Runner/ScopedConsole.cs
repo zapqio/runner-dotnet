@@ -1,5 +1,5 @@
 ﻿using System.Text;
-using Zapqio.Protocol;
+using Zapqio.Runner.Protocol;
 
 namespace Zapqio.Runner
 {
@@ -29,7 +29,7 @@ namespace Zapqio.Runner
             {
                 Date = DateTimeOffset.Now,
                 JobId = message.Id,
-                Level = Zapqio.Protocol.Enums.MessageLogLevel.Error,
+                Level = Zapqio.Runner.Protocol.Enums.MessageLogLevel.Error,
                 Message = text,
             });
             logger?.LogError(text);
@@ -44,7 +44,7 @@ namespace Zapqio.Runner
             {
                 Date = DateTimeOffset.Now,
                 JobId = message.Id,
-                Level = Zapqio.Protocol.Enums.MessageLogLevel.Info,
+                Level = Zapqio.Runner.Protocol.Enums.MessageLogLevel.Info,
                 Message = text,
             });
             logger?.LogInformation(text);

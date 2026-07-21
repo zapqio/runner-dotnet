@@ -1,6 +1,6 @@
-﻿using Zapqio.Protocol.Enums;
+﻿using Zapqio.Runner.Protocol.Enums;
 
-namespace Zapqio.Protocol
+namespace Zapqio.Runner.Protocol
 {
     public class MessageJobReturn
     {
