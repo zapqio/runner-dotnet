@@ -37,7 +37,9 @@ namespace Zapqio.Runner.Background
                                 if (!await _client.SendLogs(m))
                                 {
                                     _queue.AddLog(m); //dodanie z powrotem do kolejki jeśli nie wysłano
-                                    continue;
+                                    //przerwanie opróżniania: przy zerwanym gnieździe kolejne wysyłki też się nie udadzą,
+                                    //a pętla mieliłaby tę samą kolejkę bez końca
+                                    break;
                                 }
                             }
                         }

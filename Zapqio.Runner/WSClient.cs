@@ -128,6 +128,8 @@ namespace Zapqio.Runner
                 else
                 {
                     _logger.LogWarning($"Cannot send message of type {type}, WebSocket is not open. State: {_client.State}");
+                    //nic nie poszło w gniazdo, więc to nie jest sukces - inaczej wołający uzna, że platforma dostała wiadomość
+                    return false;
                 }
                 return true;
             }

@@ -68,13 +68,18 @@ namespace Zapqio.Runner
                     status = false;
                 }
             }
-            if (status)
+            var responseStatus = status ? MessageResponseStatus.OK : MessageResponseStatus.ERROR;
+            var returnSent = await _client.SendJobReturn(message.Id, responseStatus, status ? outData : null);
+            if (!returnSent)
             {
-                await _client.SendJobReturn(message.Id, MessageResponseStatus.OK, outData);
-            }
-            else
-            {
-                await _client.SendJobReturn(message.Id, MessageResponseStatus.ERROR, null);
+                //wynik przepadł - platforma sama zamknie osierocone zadanie, zostaje tylko ślad w logach zadania
+                _logQueue.AddLog(new MessageLog
+                {
+                    Date = DateTimeOffset.Now,
+                    Level = MessageLogLevel.Error,
+                    JobId = message.Id,
+                    Message = $"Failed to send JobReturn ({responseStatus}) - the result of this job was lost"
+                });
             }
 
         }
