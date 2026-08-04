@@ -22,6 +22,13 @@ namespace Zapqio.Runner.Background
 
         private int _failedConnects;
 
+        /// <summary>Zwłoka po pierwszym błędzie pętli; kolejne z rzędu podwajają ją do <see cref="MaxLoopErrorDelay"/>.</summary>
+        private static readonly TimeSpan BaseLoopErrorDelay = TimeSpan.FromSeconds(1);
+
+        private static readonly TimeSpan MaxLoopErrorDelay = TimeSpan.FromSeconds(30);
+
+        private int _loopErrors;
+
         public RequestBindBackground(WSClient client, ILogger<RequestBindBackground> logger, IServiceProvider serviceProvider)
         {
             _client = client;
@@ -59,13 +66,35 @@ namespace Zapqio.Runner.Background
                         await Handle(message);
                     }
 
+                    _loopErrors = 0;
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    return;
                 }
                 catch (Exception e)
                 {
                     _logger.LogError(e, "Main loop");
+                    await DelayAfterLoopErrorAsync(stoppingToken);
                 }
             }
         }
+        /// <summary>
+        /// Zwłoka po błędzie pętli. Bez niej błąd powtarzający się natychmiast - gniazdo formalnie
+        /// otwarte, ale każdy odczyt rzuca - kręci pętlą na pełnym CPU i zalewa log. Narastanie
+        /// ogranicza to drugie, gdy przyczyna nie mija.
+        /// </summary>
+        private async Task DelayAfterLoopErrorAsync(CancellationToken stoppingToken)
+        {
+            _loopErrors++;
+
+            var delay = Math.Min(
+                BaseLoopErrorDelay.TotalMilliseconds * Math.Pow(2, _loopErrors - 1),
+                MaxLoopErrorDelay.TotalMilliseconds);
+
+            await Task.Delay(TimeSpan.FromMilliseconds(delay), stoppingToken).ContinueWith(x => { });
+        }
+
         /// <summary>
         /// Odczekuje przed kolejną próbą uzgodnienia. Stała zwłoka wystarczała, dopóki jedynym
         /// powodem odmowy było niedostępne Web; odkąd serwer ogranicza tempo (§3 protokołu),
