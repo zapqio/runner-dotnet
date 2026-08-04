@@ -3,6 +3,8 @@
     public enum MessageType
     {
         Job,
+        /// <summary>Potwierdzenie odbioru przydziału (§5.3). Dodane w v2.</summary>
+        JobAccepted,
         JobReturn,
         Log,
         Info

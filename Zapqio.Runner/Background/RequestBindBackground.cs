@@ -159,6 +159,12 @@ namespace Zapqio.Runner.Background
                 using var scope = _serviceProvider.CreateScope();
                 var exec = scope.ServiceProvider.GetService<ExecuteJob>();
                 var m = JsonSerializer.Deserialize<MessageJob>(message.Data, JsonDefaults.Options);
+
+                // Potwierdzenie idzie przed czymkolwiek innym (§5.3). Platforma liczy termin od
+                // wysłania przydziału, więc każda praca wykonana wcześniej - choćby log startowy -
+                // zjada budżet, po którym zadanie wróci do kolejki i zostanie wysłane drugi raz.
+                await _client.SendJobAccepted(m.Id, m.AttemptId);
+
                 await exec.Exec(m);
             }
             finally

@@ -30,6 +30,7 @@ namespace Zapqio.Runner
                     Date = DateTimeOffset.Now,
                     Level = MessageLogLevel.Error,
                     JobId = message.Id,
+                    AttemptId = message.AttemptId,
                     Message = $"Not found method: {message.Name}"
                 });
                 status = false;
@@ -43,6 +44,7 @@ namespace Zapqio.Runner
                         Date = DateTimeOffset.Now,
                         Level = MessageLogLevel.Info,
                         JobId = message.Id,
+                        AttemptId = message.AttemptId,
                         Message = $"Run Job: {DateTimeOffset.Now:s}"
                     });
                     if (!logStatus)
@@ -63,13 +65,15 @@ namespace Zapqio.Runner
                         Date = DateTimeOffset.Now,
                         Level = MessageLogLevel.Error,
                         JobId = message.Id,
+                        AttemptId = message.AttemptId,
                         Message = $"Main exception: {ex}"
                     });
                     status = false;
                 }
             }
             var responseStatus = status ? MessageResponseStatus.OK : MessageResponseStatus.ERROR;
-            var returnSent = await _client.SendJobReturn(message.Id, responseStatus, status ? outData : null);
+            var returnSent = await _client.SendJobReturn(
+                message.Id, message.AttemptId, responseStatus, status ? outData : null);
             if (!returnSent)
             {
                 //wynik przepadł - platforma sama zamknie osierocone zadanie, zostaje tylko ślad w logach zadania
@@ -78,6 +82,7 @@ namespace Zapqio.Runner
                     Date = DateTimeOffset.Now,
                     Level = MessageLogLevel.Error,
                     JobId = message.Id,
+                    AttemptId = message.AttemptId,
                     Message = $"Failed to send JobReturn ({responseStatus}) - the result of this job was lost"
                 });
             }

@@ -56,6 +56,7 @@ public class EnumWireValueTests
     [Theory]
     [InlineData(MessageType.Info, "Info")]
     [InlineData(MessageType.Job, "Job")]
+    [InlineData(MessageType.JobAccepted, "JobAccepted")]
     [InlineData(MessageType.JobReturn, "JobReturn")]
     [InlineData(MessageType.Log, "Log")]
     public void Message_type_serializes_to_its_documented_string(MessageType type, string expected)

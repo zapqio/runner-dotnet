@@ -12,6 +12,12 @@ public static class ProtocolVersion
     /// <summary>Handshake header carrying the runner's protocol major version.</summary>
     public const string Header = "X-Zapqio-Protocol-Version";
 
-    /// <summary>The protocol major version implemented by this build.</summary>
-    public const int Current = 1;
+    /// <summary>
+    /// The protocol major version implemented by this build.
+    ///
+    /// v2 added the required <c>attemptId</c> on Job/Log/JobReturn, the <c>JobAccepted</c> message
+    /// with its acceptance deadline, and the one-outstanding-job-per-runner rule. A v1 runner cannot
+    /// talk to a v2 server: the fields are required in both directions.
+    /// </summary>
+    public const int Current = 2;
 }

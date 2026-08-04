@@ -29,6 +29,7 @@ namespace Zapqio.Runner
             {
                 Date = DateTimeOffset.Now,
                 JobId = message.Id,
+                AttemptId = message.AttemptId,
                 Level = Zapqio.Runner.Protocol.Enums.MessageLogLevel.Error,
                 Message = text,
             });
@@ -44,6 +45,7 @@ namespace Zapqio.Runner
             {
                 Date = DateTimeOffset.Now,
                 JobId = message.Id,
+                AttemptId = message.AttemptId,
                 Level = Zapqio.Runner.Protocol.Enums.MessageLogLevel.Info,
                 Message = text,
             });

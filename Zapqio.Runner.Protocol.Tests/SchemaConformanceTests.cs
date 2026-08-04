@@ -12,11 +12,13 @@ namespace Zapqio.Runner.Protocol.Tests;
 public class SchemaConformanceTests
 {
     private static readonly Guid JobId = Guid.Parse("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+    private static readonly Guid AttemptId = Guid.Parse("7f3e9c21-4b8a-4d15-9e62-0c5a7b1d8f34");
 
     private static string PayloadDef(string type) => type switch
     {
         "Info" => "messageInfo",
         "Job" => "messageJob",
+        "JobAccepted" => "messageJobAccepted",
         "JobReturn" => "messageJobReturn",
         "Log" => "messageLog",
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown message type."),
@@ -47,8 +49,17 @@ public class SchemaConformanceTests
             Wire.Frame(MessageType.Job, new MessageJob
             {
                 Id = JobId,
+                AttemptId = AttemptId,
                 Name = "resize-image",
                 Data = """{"width":800}""",
+            })
+        },
+        {
+            "JobAccepted",
+            Wire.Frame(MessageType.JobAccepted, new MessageJobAccepted
+            {
+                Id = JobId,
+                AttemptId = AttemptId,
             })
         },
         {
@@ -56,6 +67,7 @@ public class SchemaConformanceTests
             Wire.Frame(MessageType.Log, new MessageLog
             {
                 JobId = JobId,
+                AttemptId = AttemptId,
                 Level = MessageLogLevel.Error,
                 Message = "Main exception: boom",
                 Date = DateTimeOffset.Parse("2026-06-12T14:30:01.456+00:00"),
@@ -66,6 +78,7 @@ public class SchemaConformanceTests
             Wire.Frame(MessageType.JobReturn, new MessageJobReturn
             {
                 Id = JobId,
+                AttemptId = AttemptId,
                 Status = MessageResponseStatus.OK,
                 Data = """{"url":"https://cdn.example.com/out/123.png"}""",
             })
@@ -75,6 +88,7 @@ public class SchemaConformanceTests
             Wire.Frame(MessageType.JobReturn, new MessageJobReturn
             {
                 Id = JobId,
+                AttemptId = AttemptId,
                 Status = MessageResponseStatus.ERROR,
                 Data = null!,
             })

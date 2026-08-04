@@ -232,12 +232,27 @@ namespace Zapqio.Runner
         {
             return SendMessage(MessageType.Job, null);
         }
-        public Task<bool> SendJobReturn(Guid Id, MessageResponseStatus status, string data)
+        /// <summary>
+        /// Potwierdza odbiór przydziału (§5.3). Wołane natychmiast po odebraniu zadania, przed logiem
+        /// startowym - platforma bez tego zwróci zadanie do kolejki po upływie terminu.
+        /// </summary>
+        public Task<bool> SendJobAccepted(Guid id, Guid attemptId)
+        {
+            var m = new MessageJobAccepted
+            {
+                Id = id,
+                AttemptId = attemptId
+            };
+            return SendMessage(MessageType.JobAccepted, m);
+        }
+
+        public Task<bool> SendJobReturn(Guid Id, Guid attemptId, MessageResponseStatus status, string data)
         {
             var m = new MessageJobReturn
             {
                 Data = data,
                 Id = Id,
+                AttemptId = attemptId,
                 Status = status
             };
             return SendMessage(MessageType.JobReturn, m);

@@ -10,6 +10,7 @@ namespace Zapqio.Runner.Protocol.Tests;
 public class FixtureProductionTests
 {
     private static readonly Guid JobId = Guid.Parse("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+    private static readonly Guid AttemptId = Guid.Parse("7f3e9c21-4b8a-4d15-9e62-0c5a7b1d8f34");
 
     private const string ResizeImageInputSchema =
         """{"type":"object","properties":{"width":{"type":"integer"},"height":{"type":"integer"}}}""";
@@ -46,11 +47,25 @@ public class FixtureProductionTests
         var frame = Wire.Frame(MessageType.Job, new MessageJob
         {
             Id = JobId,
+            AttemptId = AttemptId,
             Name = "resize-image",
             Data = """{"width":800,"height":600}""",
         });
 
         Wire.AssertSameMessage(ProtocolRepo.Fixture("job-dispatch.json"), frame, "The produced Job dispatch frame");
+    }
+
+    [Fact]
+    public void Job_accepted_frame_matches_the_fixture()
+    {
+        var frame = Wire.Frame(MessageType.JobAccepted, new MessageJobAccepted
+        {
+            Id = JobId,
+            AttemptId = AttemptId,
+        });
+
+        Wire.AssertSameMessage(
+            ProtocolRepo.Fixture("job-accepted.json"), frame, "The produced JobAccepted frame");
     }
 
     [Theory]
@@ -61,6 +76,7 @@ public class FixtureProductionTests
         var frame = Wire.Frame(MessageType.Log, new MessageLog
         {
             JobId = JobId,
+            AttemptId = AttemptId,
             Level = level,
             Message = message,
             Date = DateTimeOffset.Parse(date),
@@ -75,6 +91,7 @@ public class FixtureProductionTests
         var frame = Wire.Frame(MessageType.JobReturn, new MessageJobReturn
         {
             Id = JobId,
+            AttemptId = AttemptId,
             Status = MessageResponseStatus.OK,
             Data = """{"url":"https://cdn.example.com/out/123.png"}""",
         });
@@ -88,6 +105,7 @@ public class FixtureProductionTests
         var frame = Wire.Frame(MessageType.JobReturn, new MessageJobReturn
         {
             Id = JobId,
+            AttemptId = AttemptId,
             Status = MessageResponseStatus.ERROR,
             Data = null!,
         });

@@ -12,6 +12,7 @@ namespace Zapqio.Runner.Protocol.Tests;
 public class FixtureConsumptionTests
 {
     private const string JobId = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    private const string AttemptId = "7f3e9c21-4b8a-4d15-9e62-0c5a7b1d8f34";
 
     private static TPayload Decode<TPayload>(string fixture, MessageType expectedType)
     {
@@ -29,6 +30,7 @@ public class FixtureConsumptionTests
     [InlineData("info.json", MessageType.Info)]
     [InlineData("job-poll.json", MessageType.Job)]
     [InlineData("job-dispatch.json", MessageType.Job)]
+    [InlineData("job-accepted.json", MessageType.JobAccepted)]
     [InlineData("log-info.json", MessageType.Log)]
     [InlineData("log-error.json", MessageType.Log)]
     [InlineData("job-return-ok.json", MessageType.JobReturn)]
@@ -75,6 +77,7 @@ public class FixtureConsumptionTests
         var job = Decode<MessageJob>("job-dispatch.json", MessageType.Job);
 
         Assert.Equal(Guid.Parse(JobId), job.Id);
+        Assert.Equal(Guid.Parse(AttemptId), job.AttemptId);
         Assert.Equal("resize-image", job.Name);
 
         // §8: MessageJob.data is itself a JSON string — the third decoding level.
@@ -92,6 +95,7 @@ public class FixtureConsumptionTests
         var log = Decode<MessageLog>(fixture, MessageType.Log);
 
         Assert.Equal(Guid.Parse(JobId), log.JobId);
+        Assert.Equal(Guid.Parse(AttemptId), log.AttemptId);
         Assert.Equal(level, log.Level);
         Assert.Equal(message, log.Message);
         Assert.Equal(DateTimeOffset.Parse(date), log.Date);
@@ -103,6 +107,7 @@ public class FixtureConsumptionTests
         var result = Decode<MessageJobReturn>("job-return-ok.json", MessageType.JobReturn);
 
         Assert.Equal(Guid.Parse(JobId), result.Id);
+        Assert.Equal(Guid.Parse(AttemptId), result.AttemptId);
         Assert.Equal(MessageResponseStatus.OK, result.Status);
 
         using var output = JsonDocument.Parse(result.Data);
@@ -115,7 +120,21 @@ public class FixtureConsumptionTests
         var result = Decode<MessageJobReturn>("job-return-error.json", MessageType.JobReturn);
 
         Assert.Equal(Guid.Parse(JobId), result.Id);
+        Assert.Equal(Guid.Parse(AttemptId), result.AttemptId);
         Assert.Equal(MessageResponseStatus.ERROR, result.Status);
         Assert.Null(result.Data);
+    }
+
+    /// <summary>
+    /// §5.3: the acknowledgement carries nothing but the (job, attempt) pair. That pair is how Web
+    /// learns the dispatch arrived, so both fields must survive both encoding levels.
+    /// </summary>
+    [Fact]
+    public void Job_accepted_carries_the_job_and_the_attempt()
+    {
+        var accepted = Decode<MessageJobAccepted>("job-accepted.json", MessageType.JobAccepted);
+
+        Assert.Equal(Guid.Parse(JobId), accepted.Id);
+        Assert.Equal(Guid.Parse(AttemptId), accepted.AttemptId);
     }
 }
