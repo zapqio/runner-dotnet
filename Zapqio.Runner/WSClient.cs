@@ -10,8 +10,8 @@ namespace Zapqio.Runner
     public class WSClient : IAsyncDisposable
     {
         /// <summary>
-        /// Wynik próby uzgodnienia połączenia. Odmowa nie jest tu wyjątkiem, bo dla pętli głównej to
-        /// zwykły stan - liczy się wyłącznie to, jak długo odczekać przed kolejną próbą.
+        /// Wynik próby uzgodnienia. Odmowa nie jest wyjątkiem - dla pętli głównej liczy się tylko to,
+        /// jak długo odczekać przed kolejną próbą.
         /// </summary>
         public readonly record struct ConnectResult(bool Connected, HttpStatusCode? Status, TimeSpan? RetryAfter)
         {
@@ -21,10 +21,7 @@ namespace Zapqio.Runner
                 => new(false, status, retryAfter);
         }
 
-        /// <summary>
-        /// Ile najwyżej honorujemy z nagłówka <c>Retry-After</c>. Zepsuta albo wroga wartość
-        /// zaparkowałaby runnera na dowolnie długo, a to gorsze niż ponowienie za wcześnie.
-        /// </summary>
+        /// <summary>Sufit na <c>Retry-After</c> - zepsuta wartość nie może zaparkować runnera na stałe.</summary>
         private const int MaxRetryAfterSeconds = 300;
 
         private readonly AppSettings _settings;
@@ -70,9 +67,8 @@ namespace Zapqio.Runner
                 }
                 client.Options.SetRequestHeader(ProtocolVersion.Header, ProtocolVersion.Current.ToString());
 
-                // Bez tego nieudane uzgadnianie daje wyłącznie WebSocketException, w którym status
-                // odpowiedzi już nie istnieje - a wtedy 429 jest nie do odróżnienia od zerwanego
-                // połączenia i runner ponawia w tym samym rytmie, zamiast się wycofać.
+                // Bez tego po nieudanym uzgadnianiu HttpStatusCode jest 0, a HttpResponseHeaders null
+                // - 429 nie do odróżnienia od zerwanego połączenia.
                 client.Options.CollectHttpResponseDetails = true;
             }
             catch (ArgumentException ex)
@@ -139,9 +135,8 @@ namespace Zapqio.Runner
         }
 
         /// <summary>
-        /// Rozbiera nieudane uzgadnianie na to, czego potrzebuje pętla główna: status odpowiedzi i
-        /// ewentualny termin ponowienia. Status bywa nieznany - gdy do serwera w ogóle nie doszliśmy,
-        /// odpowiedzi HTTP nie było.
+        /// Wyciąga z nieudanego uzgadniania status i ewentualny termin ponowienia. Statusu może nie
+        /// być - gdy do serwera nie doszliśmy, odpowiedzi HTTP nie było.
         /// </summary>
         private ConnectResult HandshakeRefused(WebSocketException ex)
         {
@@ -156,8 +151,7 @@ namespace Zapqio.Runner
 
             if (status == HttpStatusCode.TooManyRequests)
             {
-                // Świadomie nie jako błąd: serwer nie doszedł nawet do tokenu (§3 protokołu), więc
-                // odmowa nie mówi nic o tożsamości runnera i nie ma tu czego naprawiać.
+                // Ostrzeżenie, nie błąd: serwer nie doszedł do tokenu (§3), więc nie ma tu czego naprawiać.
                 _logger.LogWarning(
                     "Serwer ogranicza tempo uzgodnień (429){RetryAfter}",
                     retryAfter is null ? "" : $", prosi o odczekanie {retryAfter.Value.TotalSeconds:0}s");
@@ -171,9 +165,8 @@ namespace Zapqio.Runner
         }
 
         /// <summary>
-        /// Czyta <c>Retry-After</c> z odpowiedzi na odrzucone uzgadnianie. Protokół (§3) określa tę
-        /// wartość jako liczbę sekund, więc daty HTTP nie próbujemy rozumieć - brak wartości albo
-        /// wartość nie do sparsowania znaczy tyle, że o terminie decyduje sam runner.
+        /// Czyta <c>Retry-After</c> jako liczbę sekund (§3 protokołu). Dat HTTP nie rozumiemy - brak
+        /// albo niesparsowana wartość znaczy, że o terminie decyduje runner.
         /// </summary>
         private TimeSpan? ReadRetryAfter()
         {

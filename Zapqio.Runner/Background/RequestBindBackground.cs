@@ -68,9 +68,8 @@ namespace Zapqio.Runner.Background
         }
         /// <summary>
         /// Odczekuje przed kolejną próbą uzgodnienia. Stała zwłoka wystarczała, dopóki jedynym
-        /// powodem odmowy było niedostępne Web. Odkąd serwer ogranicza tempo uzgodnień (§3
-        /// protokołu), ponawianie w niezmienionym rytmie utrzymuje limit w stanie zadziałania -
-        /// runner odnawia go własnymi próbami zamiast pozwolić mu wygasnąć.
+        /// powodem odmowy było niedostępne Web; odkąd serwer ogranicza tempo (§3 protokołu),
+        /// ponawianie w tym samym rytmie odnawia limit własnymi próbami, zamiast dać mu wygasnąć.
         /// </summary>
         private async Task DelayBeforeReconnectAsync(WSClient.ConnectResult result, CancellationToken stoppingToken)
         {
@@ -79,8 +78,7 @@ namespace Zapqio.Runner.Background
             TimeSpan delay;
             if (result.RetryAfter is { } retryAfter)
             {
-                // Serwer podał termin, więc go dotrzymujemy. Losowa sekunda ponad to jest po to, żeby
-                // runnery odprawione tą samą wartością nie wróciły co do chwili razem.
+                // Losowa sekunda ponad termin, żeby runnery z tym samym Retry-After nie wróciły razem.
                 delay = retryAfter + TimeSpan.FromMilliseconds(Random.Shared.Next(1000));
             }
             else
@@ -89,8 +87,8 @@ namespace Zapqio.Runner.Background
                     BaseReconnectDelay.TotalMilliseconds * Math.Pow(2, _failedConnects - 1),
                     MaxReconnectDelay.TotalMilliseconds);
 
-                // Rozrzut, a nie czysty backoff: limit jest liczony na adres, więc runnery zza jednego
-                // NAT-u wracałyby zgraną falą i przekraczały go razem, rundę po rundzie.
+                // Rozrzut, bo limit jest liczony na adres: bez niego runnery zza jednego NAT-u
+                // wracałyby zgraną falą i przekraczały go razem, rundę po rundzie.
                 delay = TimeSpan.FromMilliseconds(backoff * (0.5 + Random.Shared.NextDouble() * 0.5));
             }
 
