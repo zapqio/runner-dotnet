@@ -14,6 +14,14 @@ namespace Zapqio.Runner.Background
         private bool _runMethodFirstConnected = false;
         private volatile bool _executingJob = false;
 
+        /// <summary>Zwłoka po pierwszej nieudanej próbie; kolejne podwajają ją aż do <see cref="MaxReconnectDelay"/>.</summary>
+        private static readonly TimeSpan BaseReconnectDelay = TimeSpan.FromSeconds(3);
+
+        /// <summary>Sufit wycofywania się - wyżej runner przestałby zauważać, że Web wrócił.</summary>
+        private static readonly TimeSpan MaxReconnectDelay = TimeSpan.FromSeconds(60);
+
+        private int _failedConnects;
+
         public RequestBindBackground(WSClient client, ILogger<RequestBindBackground> logger, IServiceProvider serviceProvider)
         {
             _client = client;
@@ -26,12 +34,13 @@ namespace Zapqio.Runner.Background
             {
                 try
                 {
-                    await _client.Connect();
-                    if (!_client.Connected())
+                    var connect = await _client.Connect();
+                    if (!connect.Connected)
                     {
-                        await Task.Delay(3000, stoppingToken).ContinueWith(x => { });
+                        await DelayBeforeReconnectAsync(connect, stoppingToken);
                         continue;
                     }
+                    _failedConnects = 0;
                     await FirstConnectedAsync();
                     WebSocketReceiveResult result;
                     using var ms = new MemoryStream();
@@ -57,6 +66,41 @@ namespace Zapqio.Runner.Background
                 }
             }
         }
+        /// <summary>
+        /// Odczekuje przed kolejną próbą uzgodnienia. Stała zwłoka wystarczała, dopóki jedynym
+        /// powodem odmowy było niedostępne Web. Odkąd serwer ogranicza tempo uzgodnień (§3
+        /// protokołu), ponawianie w niezmienionym rytmie utrzymuje limit w stanie zadziałania -
+        /// runner odnawia go własnymi próbami zamiast pozwolić mu wygasnąć.
+        /// </summary>
+        private async Task DelayBeforeReconnectAsync(WSClient.ConnectResult result, CancellationToken stoppingToken)
+        {
+            _failedConnects++;
+
+            TimeSpan delay;
+            if (result.RetryAfter is { } retryAfter)
+            {
+                // Serwer podał termin, więc go dotrzymujemy. Losowa sekunda ponad to jest po to, żeby
+                // runnery odprawione tą samą wartością nie wróciły co do chwili razem.
+                delay = retryAfter + TimeSpan.FromMilliseconds(Random.Shared.Next(1000));
+            }
+            else
+            {
+                var backoff = Math.Min(
+                    BaseReconnectDelay.TotalMilliseconds * Math.Pow(2, _failedConnects - 1),
+                    MaxReconnectDelay.TotalMilliseconds);
+
+                // Rozrzut, a nie czysty backoff: limit jest liczony na adres, więc runnery zza jednego
+                // NAT-u wracałyby zgraną falą i przekraczały go razem, rundę po rundzie.
+                delay = TimeSpan.FromMilliseconds(backoff * (0.5 + Random.Shared.NextDouble() * 0.5));
+            }
+
+            _logger.LogInformation(
+                "Kolejna próba połączenia za {Delay:0.#}s (nieudanych z rzędu: {Failed})",
+                delay.TotalSeconds, _failedConnects);
+
+            await Task.Delay(delay, stoppingToken).ContinueWith(x => { });
+        }
+
         private async Task FirstConnectedAsync()
         {
             if (_runMethodFirstConnected)

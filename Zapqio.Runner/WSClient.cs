@@ -1,4 +1,5 @@
-﻿using System.Net.WebSockets;
+﻿using System.Net;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Zapqio.Runner.Protocol;
@@ -8,6 +9,24 @@ namespace Zapqio.Runner
 {
     public class WSClient : IAsyncDisposable
     {
+        /// <summary>
+        /// Wynik próby uzgodnienia połączenia. Odmowa nie jest tu wyjątkiem, bo dla pętli głównej to
+        /// zwykły stan - liczy się wyłącznie to, jak długo odczekać przed kolejną próbą.
+        /// </summary>
+        public readonly record struct ConnectResult(bool Connected, HttpStatusCode? Status, TimeSpan? RetryAfter)
+        {
+            public static ConnectResult Ok() => new(true, null, null);
+
+            public static ConnectResult Failed(HttpStatusCode? status = null, TimeSpan? retryAfter = null)
+                => new(false, status, retryAfter);
+        }
+
+        /// <summary>
+        /// Ile najwyżej honorujemy z nagłówka <c>Retry-After</c>. Zepsuta albo wroga wartość
+        /// zaparkowałaby runnera na dowolnie długo, a to gorsze niż ponowienie za wcześnie.
+        /// </summary>
+        private const int MaxRetryAfterSeconds = 300;
+
         private readonly AppSettings _settings;
         private readonly ILogger<WSClient> _logger;
         private readonly MethodsProvider _methodsProvider;
@@ -26,7 +45,7 @@ namespace Zapqio.Runner
             try
             {
                 _client = new ClientWebSocket();
-                AddHeaders(_client, settings);
+                ConfigureClient(_client, settings);
             }
             catch (Exception ex)
             {
@@ -34,7 +53,7 @@ namespace Zapqio.Runner
                 throw;
             }
         }
-        private static void AddHeaders(ClientWebSocket client, AppSettings settings)
+        private static void ConfigureClient(ClientWebSocket client, AppSettings settings)
         {
             try
             {
@@ -50,6 +69,11 @@ namespace Zapqio.Runner
                     client.Options.SetRequestHeader("X-Zapqio-Name", settings.Name);
                 }
                 client.Options.SetRequestHeader(ProtocolVersion.Header, ProtocolVersion.Current.ToString());
+
+                // Bez tego nieudane uzgadnianie daje wyłącznie WebSocketException, w którym status
+                // odpowiedzi już nie istnieje - a wtedy 429 jest nie do odróżnienia od zerwanego
+                // połączenia i runner ponawia w tym samym rytmie, zamiast się wycofać.
+                client.Options.CollectHttpResponseDetails = true;
             }
             catch (ArgumentException ex)
             {
@@ -58,13 +82,13 @@ namespace Zapqio.Runner
         }
 
 
-        public async Task Connect()
+        public async Task<ConnectResult> Connect()
         {
             try
             {
                 if (_client.State == WebSocketState.Open)
                 {
-                    return;
+                    return ConnectResult.Ok();
                 }
                 if (_client.State != WebSocketState.None)
                 {
@@ -79,7 +103,7 @@ namespace Zapqio.Runner
                         _logger.LogWarning(ex, "Error during cleanup before reconnection");
                     }
                     _client = new ClientWebSocket();
-                    AddHeaders(_client, _settings);
+                    ConfigureClient(_client, _settings);
                 }
 
                 if (string.IsNullOrEmpty(_settings.Url))
@@ -91,23 +115,80 @@ namespace Zapqio.Runner
                 var cancel = new CancellationTokenSource(10000);
                 await _client.ConnectAsync(uri, cancel.Token);
                 _logger.LogInformation("Successfully connected to WebSocket at {Uri}", uri);
+                return ConnectResult.Ok();
             }
             catch (OperationCanceledException)
             {
                 _logger.LogWarning("Connection attempt timed out after 10 seconds");
+                return ConnectResult.Failed();
             }
             catch (UriFormatException ex)
             {
                 _logger.LogError(ex, "Invalid WebSocket URL format: {Url}", _settings.Url);
+                return ConnectResult.Failed();
             }
             catch (WebSocketException ex)
             {
-                _logger.LogError(ex, "WebSocket connection failed");
+                return HandshakeRefused(ex);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Unexpected error during connection");
+                return ConnectResult.Failed();
             }
+        }
+
+        /// <summary>
+        /// Rozbiera nieudane uzgadnianie na to, czego potrzebuje pętla główna: status odpowiedzi i
+        /// ewentualny termin ponowienia. Status bywa nieznany - gdy do serwera w ogóle nie doszliśmy,
+        /// odpowiedzi HTTP nie było.
+        /// </summary>
+        private ConnectResult HandshakeRefused(WebSocketException ex)
+        {
+            var status = _client.HttpStatusCode;
+            if (status == default)
+            {
+                _logger.LogError(ex, "WebSocket connection failed");
+                return ConnectResult.Failed();
+            }
+
+            var retryAfter = ReadRetryAfter();
+
+            if (status == HttpStatusCode.TooManyRequests)
+            {
+                // Świadomie nie jako błąd: serwer nie doszedł nawet do tokenu (§3 protokołu), więc
+                // odmowa nie mówi nic o tożsamości runnera i nie ma tu czego naprawiać.
+                _logger.LogWarning(
+                    "Serwer ogranicza tempo uzgodnień (429){RetryAfter}",
+                    retryAfter is null ? "" : $", prosi o odczekanie {retryAfter.Value.TotalSeconds:0}s");
+            }
+            else
+            {
+                _logger.LogError(ex, "Serwer odrzucił uzgadnianie ze statusem {Status}", (int)status);
+            }
+
+            return ConnectResult.Failed(status, retryAfter);
+        }
+
+        /// <summary>
+        /// Czyta <c>Retry-After</c> z odpowiedzi na odrzucone uzgadnianie. Protokół (§3) określa tę
+        /// wartość jako liczbę sekund, więc daty HTTP nie próbujemy rozumieć - brak wartości albo
+        /// wartość nie do sparsowania znaczy tyle, że o terminie decyduje sam runner.
+        /// </summary>
+        private TimeSpan? ReadRetryAfter()
+        {
+            var headers = _client.HttpResponseHeaders;
+            if (headers is null)
+                return null;
+
+            var raw = headers
+                .FirstOrDefault(h => string.Equals(h.Key, "Retry-After", StringComparison.OrdinalIgnoreCase))
+                .Value?.FirstOrDefault();
+
+            if (!int.TryParse(raw, out var seconds) || seconds < 0)
+                return null;
+
+            return TimeSpan.FromSeconds(Math.Min(seconds, MaxRetryAfterSeconds));
         }
         private async Task<bool> SendMessage(MessageType type, object data)
         {
