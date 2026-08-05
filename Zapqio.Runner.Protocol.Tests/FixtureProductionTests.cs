@@ -15,6 +15,9 @@ public class FixtureProductionTests
     private const string ResizeImageInputSchema =
         """{"type":"object","properties":{"width":{"type":"integer"},"height":{"type":"integer"}}}""";
 
+    private const string ResizeImageOutputSchema =
+        """{"type":"object","properties":{"url":{"type":"string"}}}""";
+
     [Fact]
     public void Info_frame_matches_the_fixture()
     {
@@ -27,7 +30,7 @@ public class FixtureProductionTests
                 {
                     Name = "resize-image",
                     In = ResizeImageInputSchema,
-                    Out = null!,
+                    Out = ResizeImageOutputSchema,
                 },
             ],
         });

@@ -51,14 +51,20 @@ public class FixtureConsumptionTests
         Assert.Equal("build-agent-01", info.Name);
         var method = Assert.Single(info.Methods);
         Assert.Equal("resize-image", method.Name);
-        Assert.Null(method.Out);
 
-        // `in` carries a JSON Schema *as a string* (§7).
+        // `in` and `out` carry a JSON Schema *as a string* (§7).
         using var inputSchema = JsonDocument.Parse(method.In);
         Assert.Equal("object", inputSchema.RootElement.GetProperty("type").GetString());
         Assert.Equal(
             "integer",
             inputSchema.RootElement.GetProperty("properties").GetProperty("width").GetProperty("type").GetString());
+
+        // The output describes what job-return-ok.json returns - the fixtures are one example.
+        using var outputSchema = JsonDocument.Parse(method.Out);
+        Assert.Equal("object", outputSchema.RootElement.GetProperty("type").GetString());
+        Assert.Equal(
+            "string",
+            outputSchema.RootElement.GetProperty("properties").GetProperty("url").GetProperty("type").GetString());
     }
 
     [Fact]

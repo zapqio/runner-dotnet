@@ -10,13 +10,34 @@ public partial class ProtocolVersionTests
 {
     private static string Spec { get; } = File.ReadAllText(Path.Combine(ProtocolRepo.Dir, "PROTOCOL.md"));
 
+    /// <summary>The heading of the section where the spec declares its major version.</summary>
+    private const string VersioningHeading = "## 1.";
+
     /// <summary>
-    /// The major version the spec declares in its title, e.g. "… — v1 (…)". Matched on the version
-    /// alone rather than on the whole title, so the assertion does not depend on the language the
-    /// spec happens to be written in.
+    /// The major version the spec declares in §1, e.g. "To jest <b>v2</b> protokołu". Matched on the
+    /// version alone rather than on the whole sentence, so the assertion does not depend on the
+    /// language the spec happens to be written in.
+    ///
+    /// Excluding a preceding hyphen is not cosmetic: without it the pattern matches
+    /// <c>stateDiagram-v2</c> from the Mermaid diagrams and the assertion passes while comparing the
+    /// protocol version against a diagram syntax version.
     /// </summary>
-    [GeneratedRegex(@"\bv(\d+)\b")]
-    private static partial Regex VersionInTitle();
+    [GeneratedRegex(@"(?<![\w-])v(\d+)\b")]
+    private static partial Regex DeclaredVersion();
+
+    /// <summary>
+    /// The body of §1 — from its heading to the next section. Searching the rest of the document is
+    /// no basis for an assertion: "v2" appears later in behaviour descriptions, so a spec that never
+    /// declares its version would still pass.
+    /// </summary>
+    private static string OverviewSection()
+    {
+        var start = Spec.IndexOf(VersioningHeading, StringComparison.Ordinal);
+        if (start < 0) return string.Empty;
+
+        var next = Spec.IndexOf("\n## ", start + VersioningHeading.Length, StringComparison.Ordinal);
+        return next < 0 ? Spec[start..] : Spec[start..next];
+    }
 
     [Fact]
     public void Handshake_header_is_the_one_the_spec_names()
@@ -28,10 +49,12 @@ public partial class ProtocolVersionTests
     [Fact]
     public void Implemented_major_version_is_the_spec_version()
     {
-        var title = Spec.Split('\n').First(line => line.StartsWith("# "));
-        var declared = VersionInTitle().Match(title);
+        var overview = OverviewSection();
+        Assert.False(overview.Length == 0, $"The spec has no '{VersioningHeading}' section declaring its version.");
 
-        Assert.True(declared.Success, $"The spec's title declares no version like 'v1': {title}");
+        var declared = DeclaredVersion().Match(overview);
+
+        Assert.True(declared.Success, "The spec's §1 declares no version like 'v2'.");
         Assert.Equal(ProtocolVersion.Current.ToString(), declared.Groups[1].Value);
     }
 }

@@ -17,18 +17,20 @@ internal static class ProtocolRepo
 
     public static string FixturesDir { get; } = Path.Combine(Dir, "fixtures");
 
-    /// <summary>Every fixture file name, i.e. every canonical frame the protocol documents.</summary>
-    public static readonly string[] AllFixtures =
-    [
-        "info.json",
-        "job-poll.json",
-        "job-dispatch.json",
-        "job-accepted.json",
-        "log-info.json",
-        "log-error.json",
-        "job-return-ok.json",
-        "job-return-error.json",
-    ];
+    /// <summary>
+    /// Every fixture file name, i.e. every canonical frame the protocol documents.
+    ///
+    /// Read from the directory rather than listed here: a hardcoded list would mean a fixture added
+    /// to the protocol repository is validated by nothing while looking as if it were covered.
+    /// Sorted so the test cases do not depend on the order the file system happens to return.
+    /// </summary>
+    public static readonly string[] AllFixtures = Directory.Exists(FixturesDir)
+        ? Directory.EnumerateFiles(FixturesDir, "*.json")
+            .Select(Path.GetFileName)
+            .OfType<string>()
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray()
+        : [];
 
     /// <summary>The exact bytes of one canonical WebSocket text frame.</summary>
     public static string Fixture(string name)
