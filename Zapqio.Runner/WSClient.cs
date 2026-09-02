@@ -284,32 +284,72 @@ namespace Zapqio.Runner
                 Methods = l,
                 Name = _settings.Name
             };
+
+            // Lista idzie do logu, bo "runner w panelu bez metod" to najczęstszy objaw problemu z modułami,
+            // a bez tego wpisu nie widać, czy zawinił katalog Modules, ładowanie DLL czy sama platforma.
+            if (l.Count == 0)
+            {
+                _logger.LogWarning(
+                    "Wysyłam Info bez żadnej metody - runner nie załadował modułów. Przyczyna powinna być wyżej w logu (wpisy MethodsProvider)");
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Wysyłam Info: {Count} metod: {Methods}",
+                    l.Count, string.Join(", ", l.Select(x => x.Name)));
+            }
+
             return SendMessage(MessageType.Info, i);
         }
+        /// <summary>
+        /// Zamyka gniazdo uzgodnieniem - ramka Close w obie strony - żeby platforma od razu wiedziała,
+        /// że runner odszedł, zamiast czekać, aż wykryje martwe TCP. Bezpieczne przy trwającym
+        /// <see cref="ReceiveAsync"/> z pętli głównej: odpowiedź serwera odbierze ten odczyt, a to
+        /// wywołanie na nią zaczeka. Gdy gniazdo nie jest otwarte, nie robi nic.
+        /// </summary>
+        public async Task CloseAsync(CancellationToken cancellationToken)
+        {
+            var client = _client;
+            if (client is null)
+                return;
+            if (client.State != WebSocketState.Open && client.State != WebSocketState.CloseReceived)
+                return;
+
+            try
+            {
+                // Anulowanie w trakcie CloseAsync zrywa gniazdo (Abort) - to zamierzone: po upływie
+                // limitu i tak nie ma na co czekać.
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(5000);
+                await client.CloseAsync(WebSocketCloseStatus.NormalClosure, "Runner stopping", timeout.Token);
+                _logger.LogInformation("WebSocket closed");
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("Closing WebSocket timed out, aborting the connection");
+                client.Abort();
+            }
+            catch (WebSocketException ex)
+            {
+                _logger.LogWarning(ex, "WebSocket error while closing, aborting the connection");
+                client.Abort();
+            }
+            catch (ObjectDisposedException)
+            {
+                _logger.LogDebug("WebSocket was already disposed");
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Drugie równoległe zamykanie tego samego gniazda - pierwsze je dokończy.
+                _logger.LogDebug(ex, "WebSocket close already in progress");
+            }
+        }
+
         public async ValueTask DisposeAsync()
         {
             try
             {
-                if (_client != null)
-                {
-                    if (_client.State == WebSocketState.Open || _client.State == WebSocketState.CloseReceived)
-                    {
-                        var cancel = new CancellationTokenSource(5000);
-                        await _client.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closed", cancel.Token);
-                    }
-                    _client.Dispose();
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogWarning("Closing WebSocket timed out during disposal");
-                _client?.Abort();
-                _client?.Dispose();
-            }
-            catch (WebSocketException ex)
-            {
-                _logger.LogError(ex, "WebSocket error during disposal");
-                _client?.Abort();
+                await CloseAsync(CancellationToken.None);
                 _client?.Dispose();
             }
             catch (ObjectDisposedException)

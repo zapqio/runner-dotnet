@@ -14,6 +14,9 @@ namespace Zapqio.Runner.Background
         private bool _runMethodFirstConnected = false;
         private volatile bool _executingJob = false;
 
+        /// <summary>Ustawiane w <see cref="StopAsync"/>, zanim host anuluje pętlę - żeby po zamknięciu gniazda nie próbowała się łączyć na nowo.</summary>
+        private volatile bool _stopping = false;
+
         /// <summary>Zwłoka po pierwszej nieudanej próbie; kolejne podwajają ją aż do <see cref="MaxReconnectDelay"/>.</summary>
         private static readonly TimeSpan BaseReconnectDelay = TimeSpan.FromSeconds(3);
 
@@ -35,9 +38,23 @@ namespace Zapqio.Runner.Background
             _logger = logger;
             _serviceProvider = serviceProvider;
         }
+        /// <summary>
+        /// Uzgodnienie zamknięcia idzie przed anulowaniem pętli. Anulowanie trwającego ReceiveAsync
+        /// zrywa gniazdo bez ramki Close (stan Aborted), przez co DisposeAsync klienta nie ma już
+        /// czego zamykać, a platforma dowiaduje się o odejściu runnera dopiero, gdy wykryje martwe
+        /// TCP - za proxy potrafi to trwać minuty. Tutaj gniazdo jest jeszcze otwarte, a odpowiedź
+        /// serwera odbierze trwający odczyt pętli.
+        /// </summary>
+        public override async Task StopAsync(CancellationToken cancellationToken)
+        {
+            _stopping = true;
+            await _client.CloseAsync(cancellationToken);
+            await base.StopAsync(cancellationToken);
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            while (!stoppingToken.IsCancellationRequested)
+            while (!stoppingToken.IsCancellationRequested && !_stopping)
             {
                 try
                 {
@@ -57,6 +74,22 @@ namespace Zapqio.Runner.Background
                         result = await _client.ReceiveAsync(buff, stoppingToken);
                         ms.Write(buff, 0, result.Count);
                     } while (!result.EndOfMessage);
+
+                    if (result.MessageType == WebSocketMessageType.Close)
+                    {
+                        // Ramka Close - albo odpowiedź na nasze zamknięcie (wtedy CloseAsync klienta
+                        // już nie ma nic do zrobienia), albo serwer zamyka pierwszy: dopowiadamy
+                        // uzgodnienie, a kolejny obrót pętli łączy się na nowo.
+                        if (_stopping)
+                            _logger.LogDebug("Platforma potwierdziła zamknięcie ({Status})", result.CloseStatus);
+                        else
+                            _logger.LogInformation(
+                                "Platforma zamknęła połączenie ({Status}: {Description})",
+                                result.CloseStatus, result.CloseStatusDescription);
+                        await _client.CloseAsync(stoppingToken);
+                        continue;
+                    }
+
                     ms.Position = 0;
                     var json = Encoding.UTF8.GetString(ms.ToArray());
                     var message = JsonSerializer.Deserialize<Message>(json, JsonDefaults.Options);
@@ -70,6 +103,12 @@ namespace Zapqio.Runner.Background
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
+                    return;
+                }
+                catch (Exception e) when (_stopping)
+                {
+                    // Gniazdo zamknięte przez StopAsync w trakcie odczytu - to nie jest błąd pętli.
+                    _logger.LogDebug(e, "Main loop interrupted by shutdown");
                     return;
                 }
                 catch (Exception e)

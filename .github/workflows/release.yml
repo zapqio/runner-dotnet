@@ -19,7 +19,7 @@ on:
       - main
 
 env:
-  VERSION: "0.1.1" # <- tu ustawiasz wersję kolejnego release'u
+  VERSION: "0.1.2" # <- tu ustawiasz wersję kolejnego release'u
 
 permissions:
   contents: write
