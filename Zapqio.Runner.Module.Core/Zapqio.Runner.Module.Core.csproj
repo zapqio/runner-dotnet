@@ -8,6 +8,11 @@
     <!-- NuGet Package Settings -->
     <PackageId>Zapqio.Runner.Module.Core</PackageId>
     <Version>1.0.0</Version>
+    <!-- Tozsamosc kontraktu musi byc stabilna i zgodna z wersja paczki NuGet, przeciw ktorej
+         kompiluja sie moduly. Bez tego -p:Version=<wersja release'u> z release.yml nadpisuje
+         AssemblyVersion (np. na 0.1.4.0) i moduly przestaja sie wiazac: "The located assembly's
+         manifest definition does not match the assembly reference" (0x80131040). -->
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <Authors>Zapqio</Authors>
     <Company>Hdwr global</Company>
     <Product>Zapqio Runner Module Lib</Product>
