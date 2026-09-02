@@ -37,16 +37,17 @@ o konfigurację i zakłada usługę jednym poleceniem — patrz
 - **Windows x64** z listy systemów wspieranych przez .NET 10: Windows 10 od wersji 1607, Windows 11
   oraz Windows Server od 2012 R2
   ([pełna lista](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md)).
-- **Zainstalowany .NET Desktop Runtime 10 (x64).** Paczka `win-x64` jest framework-dependent, więc
-  nie zawiera runtime'u. Potrzebny jest wariant *Desktop* (zawiera zwykły .NET Runtime), bo runner
-  odwołuje się do `Microsoft.WindowsDesktop.App`. Najprościej:
-  `winget install Microsoft.DotNet.DesktopRuntime.10`, albo instalator ze strony
-  [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/10.0) (sekcja *.NET Desktop
+- **Zainstalowany .NET Desktop Runtime 8 (x64).** Domyślna paczka `win-x64-net8` jest
+  framework-dependent, więc nie zawiera runtime'u. Potrzebny jest wariant *Desktop* (zawiera zwykły
+  .NET Runtime), bo runner odwołuje się do `Microsoft.WindowsDesktop.App`. Najprościej:
+  `winget install Microsoft.DotNet.DesktopRuntime.8`, albo instalator ze strony
+  [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/8.0) (sekcja *.NET Desktop
   Runtime*, Windows x64). Skrypt instalacyjny sprawdza to na starcie i bez runtime'u się zatrzymuje.
-- **Wariant .NET 8** — `install.ps1 -Net8` instaluje paczkę `win-x64-net8` dla maszyn z modułami,
-  które nie działają na .NET 10; wymaga wtedy **.NET Desktop Runtime 8 (x64)**
-  (`winget install Microsoft.DotNet.DesktopRuntime.8`). Dotyczy m.in. modułu nexo: obfuskowane
-  biblioteki InsERT-a (`InsERT.Moria.Sfera` i pokrewne) od .NET 9 są odrzucane przez loader.
+- **Wariant .NET 10** — `install.ps1 -Net10` instaluje paczkę `win-x64` i wymaga wtedy
+  **.NET Desktop Runtime 10 (x64)** (`winget install Microsoft.DotNet.DesktopRuntime.10`).
+  Domyślny jest .NET 8, bo część modułów nie ładuje się na nowszym runtime — moduł nexo korzysta
+  z obfuskowanych bibliotek InsERT-a (`InsERT.Moria.Sfera` i pokrewne), które loader odrzuca
+  od .NET 9. Jeśli nie używasz takich modułów, wybierz `-Net10`.
 - Konto z uprawnieniami administratora (instalacja usługi).
 - Wychodzący dostęp sieciowy do instancji Web (WebSocket, `wss://…`, zwykle TCP 443). Runner
   niczego nie nasłuchuje — nie trzeba otwierać portów przychodzących.
@@ -55,7 +56,7 @@ o konfigurację i zakłada usługę jednym poleceniem — patrz
 
 ### 2. Instalacja usługi
 
-Całą instalację wykonuje skrypt [`install.ps1`](./install.ps1): pobiera paczkę win-x64
+Całą instalację wykonuje skrypt [`install.ps1`](./install.ps1): pobiera paczkę win-x64-net8
 z GitHub Releases (domyślnie najnowszą), rozpakowuje ją, zapisuje konfigurację
 w `appsettings.json`, rejestruje usługę i czeka, aż runner potwierdzi w logu nawiązanie
 połączenia WebSocket z instancją Web.

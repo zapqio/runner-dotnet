@@ -9,8 +9,8 @@
 # Workflow sam założy tag v<VERSION>, odpali testy, zbuduje paczki framework-dependent
 # (win-x64 i linux-x64 - na maszynie docelowej musi być zainstalowany runtime .NET 10;
 # na Windows .NET Desktop Runtime 10, bo runner odwołuje się do Microsoft.WindowsDesktop.App)
-# oraz dodatkową paczkę win-x64-net8 dla maszyn, na których moduły nie działają pod .NET 10
-# (instaluje ją install.ps1 -Net8; wymaga .NET Desktop Runtime 8)
+# oraz paczkę win-x64-net8 dla maszyn, na których moduły nie działają pod .NET 10 - to ją
+# install.ps1 instaluje domyślnie, paczkę .NET 10 wybiera się flagą -Net10
 # i opublikuje release na GitHubie.
 # Push bez zmiany VERSION niczego nie wydaje (wersja już istnieje, kroki są pomijane).
 # Jak testy nie przejdą, release nie powstanie.
