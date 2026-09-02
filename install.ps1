@@ -121,6 +121,32 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     throw 'Uruchom ten skrypt w PowerShellu jako administrator.'
 }
 
+# Paczka jest framework-dependent: runtime musi być na maszynie. Potrzebny jest .NET Desktop
+# Runtime 10 x64 (zawiera zwykły runtime), bo runner odwołuje się do Microsoft.WindowsDesktop.App.
+# Sprawdzamy instalację x64 pod Program Files (tam szuka apphost usługi), a dopiero potem PATH —
+# dotnet.exe z PATH bywa 32-bitowy albo z katalogu użytkownika, którego usługa nie zobaczy.
+function Test-DotnetDesktopRuntime10 {
+    $candidates = @()
+    if ($env:DOTNET_ROOT) { $candidates += (Join-Path $env:DOTNET_ROOT 'dotnet.exe') }
+    $candidates += (Join-Path $env:ProgramFiles 'dotnet\dotnet.exe')
+    $fromPath = Get-Command dotnet.exe -ErrorAction SilentlyContinue
+    if ($fromPath) { $candidates += $fromPath.Source }
+    foreach ($dotnet in $candidates | Select-Object -Unique) {
+        if (-not (Test-Path $dotnet)) { continue }
+        $runtimes = & $dotnet --list-runtimes
+        if ($runtimes | Where-Object { $_ -match '^Microsoft\.WindowsDesktop\.App 10\.' }) { return $true }
+    }
+    return $false
+}
+
+if (-not (Test-DotnetDesktopRuntime10)) {
+    throw @'
+Brak .NET Desktop Runtime 10 (x64), którego wymaga runner. Zainstaluj go i uruchom skrypt ponownie:
+  winget install Microsoft.DotNet.DesktopRuntime.10
+albo instalatorem ze strony https://dotnet.microsoft.com/download/dotnet/10.0 (sekcja ".NET Desktop Runtime", Windows x64).
+'@
+}
+
 function Invoke-Sc {
     param([Parameter(Mandatory)][string[]]$ScArgs)
     $out = & sc.exe @ScArgs

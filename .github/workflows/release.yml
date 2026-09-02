@@ -6,8 +6,10 @@
 #        git commit -m "Release v0.2.0"
 #        git push
 #
-# Workflow sam założy tag v<VERSION>, odpali testy, zbuduje paczki self-contained
-# (win-x64 i linux-x64) i opublikuje release na GitHubie.
+# Workflow sam założy tag v<VERSION>, odpali testy, zbuduje paczki framework-dependent
+# (win-x64 i linux-x64 - na maszynie docelowej musi być zainstalowany runtime .NET 10;
+# na Windows .NET Desktop Runtime 10, bo runner odwołuje się do Microsoft.WindowsDesktop.App)
+# i opublikuje release na GitHubie.
 # Push bez zmiany VERSION niczego nie wydaje (wersja już istnieje, kroki są pomijane).
 # Jak testy nie przejdą, release nie powstanie.
 
@@ -19,7 +21,7 @@ on:
       - main
 
 env:
-  VERSION: "0.1.2" # <- tu ustawiasz wersję kolejnego release'u
+  VERSION: "0.1.3" # <- tu ustawiasz wersję kolejnego release'u
 
 permissions:
   contents: write
@@ -56,7 +58,7 @@ jobs:
         shell: pwsh
         run: >
           dotnet publish Zapqio.Runner -c Release -f net10.0-windows -r win-x64
-          --self-contained -p:Version=${{ env.VERSION }}
+          --no-self-contained -p:Version=${{ env.VERSION }}
           -o publish/win-x64
 
       - name: Publish linux-x64
@@ -64,7 +66,7 @@ jobs:
         shell: pwsh
         run: >
           dotnet publish Zapqio.Runner -c Release -f net10.0 -r linux-x64
-          --self-contained -p:Version=${{ env.VERSION }}
+          --no-self-contained -p:Version=${{ env.VERSION }}
           -o publish/linux-x64
 
       - name: Spakuj artefakty

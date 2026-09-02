@@ -34,10 +34,15 @@ o konfigurację i zakłada usługę jednym poleceniem — patrz
 
 ### 1. Wymagania
 
-- **Windows x64.** Paczka `win-x64` jest self-contained (.NET 10), więc obowiązuje lista systemów
-  wspieranych przez .NET 10: Windows 10 od wersji 1607, Windows 11 oraz Windows Server od 2012 R2
+- **Windows x64** z listy systemów wspieranych przez .NET 10: Windows 10 od wersji 1607, Windows 11
+  oraz Windows Server od 2012 R2
   ([pełna lista](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md)).
-  Zainstalowany .NET nie jest potrzebny.
+- **Zainstalowany .NET Desktop Runtime 10 (x64).** Paczka `win-x64` jest framework-dependent, więc
+  nie zawiera runtime'u. Potrzebny jest wariant *Desktop* (zawiera zwykły .NET Runtime), bo runner
+  odwołuje się do `Microsoft.WindowsDesktop.App`. Najprościej:
+  `winget install Microsoft.DotNet.DesktopRuntime.10`, albo instalator ze strony
+  [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/10.0) (sekcja *.NET Desktop
+  Runtime*, Windows x64). Skrypt instalacyjny sprawdza to na starcie i bez runtime'u się zatrzymuje.
 - Konto z uprawnieniami administratora (instalacja usługi).
 - Wychodzący dostęp sieciowy do instancji Web (WebSocket, `wss://…`, zwykle TCP 443). Runner
   niczego nie nasłuchuje — nie trzeba otwierać portów przychodzących.
