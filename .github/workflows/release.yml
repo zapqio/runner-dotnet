@@ -1,0 +1,118 @@
+# Jak wydać nowy release:
+#
+#   1. Podbij numer w linii VERSION poniżej (np. 0.1.0 -> 0.2.0)
+#   2. Commit i push na main:
+#        git add .github/workflows/release.yml
+#        git commit -m "Release v0.2.0"
+#        git push
+#
+# Workflow sam założy tag v<VERSION>, odpali testy, zbuduje paczki self-contained
+# (win-x64 i linux-x64) i opublikuje release na GitHubie.
+# Push bez zmiany VERSION niczego nie wydaje (wersja już istnieje, kroki są pomijane).
+# Jak testy nie przejdą, release nie powstanie.
+
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  VERSION: "0.1.1" # <- tu ustawiasz wersję kolejnego release'u
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Sprawdź, czy ta wersja już wyszła
+        id: check
+        shell: bash
+        run: |
+          if git ls-remote --exit-code origin "refs/tags/v${{ env.VERSION }}" > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-dotnet@v4
+        if: steps.check.outputs.exists == 'false'
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Testy
+        if: steps.check.outputs.exists == 'false'
+        run: dotnet test -c Release
+
+      - name: Publish win-x64
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        run: >
+          dotnet publish Zapqio.Runner -c Release -f net10.0-windows -r win-x64
+          --self-contained -p:Version=${{ env.VERSION }}
+          -o publish/win-x64
+
+      - name: Publish linux-x64
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        run: >
+          dotnet publish Zapqio.Runner -c Release -f net10.0 -r linux-x64
+          --self-contained -p:Version=${{ env.VERSION }}
+          -o publish/linux-x64
+
+      - name: Spakuj artefakty
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish/win-x64/* -DestinationPath "zapqio-runner-${{ env.VERSION }}-win-x64.zip"
+          tar -czf "zapqio-runner-${{ env.VERSION }}-linux-x64.tar.gz" -C publish/linux-x64 .
+
+      - name: Utwórz release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          files: |
+            zapqio-runner-*-win-x64.zip
+            zapqio-runner-*-linux-x64.tar.gz
+          generate_release_notes: true
+
+      - name: Podsumowanie
+        shell: bash
+        run: |
+          next=$(echo "${{ env.VERSION }}" | awk -F. '{ printf "%d.%d.%d", $1, $2, $3 + 1 }')
+
+          if [ "${{ steps.check.outputs.exists }}" = "false" ]; then
+            cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Release v${{ env.VERSION }} opublikowany 🎉
+
+          Paczki: \`zapqio-runner-${{ env.VERSION }}-win-x64.zip\`, \`zapqio-runner-${{ env.VERSION }}-linux-x64.tar.gz\`
+          EOF
+          else
+            cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Bez release — wersja v${{ env.VERSION }} jest już wydana
+
+          Ten push nie zmienił \`VERSION\`, więc niczego nie opublikowano.
+          EOF
+          fi
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+
+          ### Jak wydać kolejny release (np. v$next)
+
+          1. W pliku \`.github/workflows/release.yml\` zmień linię \`VERSION: "${{ env.VERSION }}"\` na \`VERSION: "$next"\`
+          2. Wykonaj dokładnie te komendy:
+
+          \`\`\`
+          git add .github/workflows/release.yml
+          git commit -m "Release v$next"
+          git push
+          \`\`\`
+          EOF
