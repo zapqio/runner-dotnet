@@ -9,6 +9,8 @@
 # Workflow sam założy tag v<VERSION>, odpali testy, zbuduje paczki framework-dependent
 # (win-x64 i linux-x64 - na maszynie docelowej musi być zainstalowany runtime .NET 10;
 # na Windows .NET Desktop Runtime 10, bo runner odwołuje się do Microsoft.WindowsDesktop.App)
+# oraz dodatkową paczkę win-x64-net8 dla maszyn, na których moduły nie działają pod .NET 10
+# (instaluje ją install.ps1 -Net8; wymaga .NET Desktop Runtime 8)
 # i opublikuje release na GitHubie.
 # Push bez zmiany VERSION niczego nie wydaje (wersja już istnieje, kroki są pomijane).
 # Jak testy nie przejdą, release nie powstanie.
@@ -21,7 +23,7 @@ on:
       - main
 
 env:
-  VERSION: "0.1.3" # <- tu ustawiasz wersję kolejnego release'u
+  VERSION: "0.1.4" # <- tu ustawiasz wersję kolejnego release'u
 
 permissions:
   contents: write
@@ -69,12 +71,23 @@ jobs:
           --no-self-contained -p:Version=${{ env.VERSION }}
           -o publish/linux-x64
 
+      # Wariant dla maszyn z modułami niedziałającymi na .NET 10 (np. nexo: obfuskowane
+      # biblioteki InsERT-a nie ładują się na .NET 9+)
+      - name: Publish win-x64 (.NET 8)
+        if: steps.check.outputs.exists == 'false'
+        shell: pwsh
+        run: >
+          dotnet publish Zapqio.Runner -c Release -f net8.0-windows -r win-x64
+          --no-self-contained -p:Version=${{ env.VERSION }}
+          -o publish/win-x64-net8
+
       - name: Spakuj artefakty
         if: steps.check.outputs.exists == 'false'
         shell: pwsh
         run: |
           Compress-Archive -Path publish/win-x64/* -DestinationPath "zapqio-runner-${{ env.VERSION }}-win-x64.zip"
           tar -czf "zapqio-runner-${{ env.VERSION }}-linux-x64.tar.gz" -C publish/linux-x64 .
+          Compress-Archive -Path publish/win-x64-net8/* -DestinationPath "zapqio-runner-${{ env.VERSION }}-win-x64-net8.zip"
 
       - name: Utwórz release
         if: steps.check.outputs.exists == 'false'
@@ -83,6 +96,7 @@ jobs:
           tag_name: v${{ env.VERSION }}
           files: |
             zapqio-runner-*-win-x64.zip
+            zapqio-runner-*-win-x64-net8.zip
             zapqio-runner-*-linux-x64.tar.gz
           generate_release_notes: true
 

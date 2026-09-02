@@ -6,7 +6,8 @@
     Instaluje lub aktualizuje Zapqio Runner jako usługę Windows.
 
 .DESCRIPTION
-    Pobiera paczkę zapqio-runner-<wersja>-win-x64.zip z GitHub Releases (domyślnie
+    Pobiera paczkę zapqio-runner-<wersja>-win-x64.zip z GitHub Releases (przy -Net8
+    wariant -win-x64-net8.zip; domyślnie
     najnowszą), rozpakowuje do katalogu instalacji i rejestruje usługę Windows:
     start automatyczny, polityka restartu po awarii procesu, konto wirtualne
     NT SERVICE\<usługa> z prawem zapisu ograniczonym do katalogu instalacji
@@ -60,6 +61,12 @@
     Zostawia usługę na koncie LocalSystem zamiast przełączać na konto wirtualne
     NT SERVICE\<usługa>.
 
+.PARAMETER Net8
+    Instaluje wariant runnera zbudowany na .NET 8 zamiast .NET 10 — dla maszyn
+    z modułami, które nie ładują się na .NET 10. Dotyczy m.in. modułu nexo:
+    obfuskowane biblioteki InsERT-a (InsERT.Moria.Sfera i pokrewne) od .NET 9
+    są odrzucane przez loader. Wymaga .NET Desktop Runtime 8 (x64).
+
 .EXAMPLE
     .\install.ps1 -Instance test -Token <token>
 
@@ -73,6 +80,10 @@
 .EXAMPLE
     # Aktualizacja do najnowszej wersji, konfiguracja zostaje bez zmian:
     .\install.ps1
+
+.EXAMPLE
+    # Maszyna z modułem nexo — wariant na .NET 8:
+    .\install.ps1 -Instance test -Token <token> -Net8
 
 .NOTES
     Uruchomienie bez klonowania repozytorium (PowerShell jako administrator).
@@ -102,7 +113,8 @@ param(
     [ValidateSet('Verbose', 'Debug', 'Information', 'Warning', 'Error', 'Fatal')]
     [string]$LogLevel,
     [string]$LogDirectory,
-    [switch]$LocalSystem
+    [switch]$LocalSystem,
+    [switch]$Net8
 )
 
 $ErrorActionPreference = 'Stop'
@@ -122,10 +134,12 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 # Paczka jest framework-dependent: runtime musi być na maszynie. Potrzebny jest .NET Desktop
-# Runtime 10 x64 (zawiera zwykły runtime), bo runner odwołuje się do Microsoft.WindowsDesktop.App.
+# Runtime x64 (zawiera zwykły runtime), bo runner odwołuje się do Microsoft.WindowsDesktop.App —
+# w wersji 10, a dla wariantu -Net8 w wersji 8.
 # Sprawdzamy instalację x64 pod Program Files (tam szuka apphost usługi), a dopiero potem PATH —
 # dotnet.exe z PATH bywa 32-bitowy albo z katalogu użytkownika, którego usługa nie zobaczy.
-function Test-DotnetDesktopRuntime10 {
+function Test-DotnetDesktopRuntime {
+    param([Parameter(Mandatory)][int]$Major)
     $candidates = @()
     if ($env:DOTNET_ROOT) { $candidates += (Join-Path $env:DOTNET_ROOT 'dotnet.exe') }
     $candidates += (Join-Path $env:ProgramFiles 'dotnet\dotnet.exe')
@@ -134,17 +148,18 @@ function Test-DotnetDesktopRuntime10 {
     foreach ($dotnet in $candidates | Select-Object -Unique) {
         if (-not (Test-Path $dotnet)) { continue }
         $runtimes = & $dotnet --list-runtimes
-        if ($runtimes | Where-Object { $_ -match '^Microsoft\.WindowsDesktop\.App 10\.' }) { return $true }
+        if ($runtimes | Where-Object { $_ -match "^Microsoft\.WindowsDesktop\.App $Major\." }) { return $true }
     }
     return $false
 }
 
-if (-not (Test-DotnetDesktopRuntime10)) {
-    throw @'
-Brak .NET Desktop Runtime 10 (x64), którego wymaga runner. Zainstaluj go i uruchom skrypt ponownie:
-  winget install Microsoft.DotNet.DesktopRuntime.10
-albo instalatorem ze strony https://dotnet.microsoft.com/download/dotnet/10.0 (sekcja ".NET Desktop Runtime", Windows x64).
-'@
+$runtimeMajor = if ($Net8) { 8 } else { 10 }
+if (-not (Test-DotnetDesktopRuntime $runtimeMajor)) {
+    throw @"
+Brak .NET Desktop Runtime $runtimeMajor (x64), którego wymaga runner. Zainstaluj go i uruchom skrypt ponownie:
+  winget install Microsoft.DotNet.DesktopRuntime.$runtimeMajor
+albo instalatorem ze strony https://dotnet.microsoft.com/download/dotnet/$runtimeMajor.0 (sekcja ".NET Desktop Runtime", Windows x64).
+"@
 }
 
 function Invoke-Sc {
@@ -182,7 +197,8 @@ if ($Version) {
     $Version = $release.tag_name -replace '^v', ''
 }
 
-$zipName = "zapqio-runner-$Version-win-x64.zip"
+$flavor = if ($Net8) { '-net8' } else { '' }
+$zipName = "zapqio-runner-$Version-win-x64$flavor.zip"
 $zipUrl = "https://github.com/$repo/releases/download/v$Version/$zipName"
 
 $tempDir = Join-Path $env:TEMP ("zapqio-runner-install-" + [guid]::NewGuid())
@@ -448,7 +464,7 @@ try {
     $installedVersion = (Get-Item $exePath).VersionInfo.ProductVersion
     $status = (Get-Service -Name $ServiceName).Status
     Write-Host ''
-    Write-Host "Zapqio Runner $installedVersion — usługa $ServiceName ($status)."
+    Write-Host "Zapqio Runner $installedVersion$(if ($Net8) { ' (wariant .NET 8)' }) — usługa $ServiceName ($status)."
     Write-Host "  Katalog: $InstallDir"
     Write-Host "  Konfiguracja: $appsettingsPath"
     Write-Host "  Logi: $(if ($logsDir) { $logsDir } else { 'wyłączone (Logger:PathDirectory puste)' })"
