@@ -90,6 +90,13 @@ Co warto wiedzieć, pisząc moduł:
 - `Console.WriteLine` i `Console.Error.WriteLine` z wnętrza `Run` trafiają na żywo do logów zadania
   w panelu Web (strumień błędów jako poziom `Error`).
 - Wyjątek z `Run` kończy zadanie statusem `ERROR`, a jego treść ląduje w logach zadania.
+- `JobContext.Current` (od `Module.Core` 1.1) daje w `Run` identyfikator operacji (`JobId`, ten sam
+  przy każdej wysyłce i każdym ponowieniu tego zadania), identyfikator próby (`AttemptId`) i nazwę
+  metody. Metoda z nieodwracalnym skutkiem powinna zapisać `JobId` razem ze skutkiem i przed
+  wykonaniem sprawdzić, czy taki już istnieje — platforma wysyła zadanie ponownie, gdy straciła
+  runnera po starcie metody i nie wie, jak się skończyła. Poza `Run` kontekst jest pusty.
+- Wynik, którego nie udało się odesłać przed zerwaniem połączenia, runner trzyma w pamięci i wysyła
+  zaraz po ponownym połączeniu z tym samym identyfikatorem próby; restart usługi go gubi.
 - Wynik idzie jedną wiadomością WebSocket, a serwer przyjmuje najwyżej 32 MiB na wiadomość — rozmiar
   wyniku trzeba ograniczyć po stronie modułu, z zapasem na kodowanie.
 

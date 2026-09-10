@@ -13,9 +13,14 @@ namespace Zapqio.Runner
         /// Wynik próby uzgodnienia. Odmowa nie jest wyjątkiem - dla pętli głównej liczy się tylko to,
         /// jak długo odczekać przed kolejną próbą.
         /// </summary>
-        public readonly record struct ConnectResult(bool Connected, HttpStatusCode? Status, TimeSpan? RetryAfter)
+        /// <param name="Established">
+        /// Prawda tylko wtedy, gdy TO wywołanie nawiązało nowe połączenie. Gniazdo zastane otwarte daje
+        /// <see cref="Connected"/> bez <see cref="Established"/> - pętla główna woła <see cref="Connect"/>
+        /// w każdym obrocie, a niektóre rzeczy (ponowienie wyniku) mają sens wyłącznie po powrocie.
+        /// </param>
+        public readonly record struct ConnectResult(bool Connected, HttpStatusCode? Status, TimeSpan? RetryAfter, bool Established = false)
         {
-            public static ConnectResult Ok() => new(true, null, null);
+            public static ConnectResult Ok(bool established = false) => new(true, null, null, established);
 
             public static ConnectResult Failed(HttpStatusCode? status = null, TimeSpan? retryAfter = null)
                 => new(false, status, retryAfter);
@@ -111,7 +116,7 @@ namespace Zapqio.Runner
                 var cancel = new CancellationTokenSource(10000);
                 await _client.ConnectAsync(uri, cancel.Token);
                 _logger.LogInformation("Successfully connected to WebSocket at {Uri}", uri);
-                return ConnectResult.Ok();
+                return ConnectResult.Ok(established: true);
             }
             catch (OperationCanceledException)
             {

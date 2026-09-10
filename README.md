@@ -20,7 +20,8 @@ są w [szczegółach](./docs/szczegoly.md).
 - W danej chwili wykonuje **jedno** zadanie. To, co metoda wypisze na konsolę, trafia na żywo do
   logów zadania w panelu Web.
 - Zerwane połączenie odtwarza sam, z narastającą zwłoką (3 s → 60 s) — restart usługi nie jest do
-  tego potrzebny.
+  tego potrzebny. Wynik zadania, którego nie udało się odesłać przed zerwaniem, zostaje w pamięci
+  i idzie zaraz po ponownym połączeniu, z tym samym identyfikatorem próby.
 
 ## Instalacja jako usługa Windows (Windows Service)
 

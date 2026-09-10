@@ -50,6 +50,7 @@ namespace Zapqio.Runner
             builder.Services.AddSingleton<MethodsProvider>();
             builder.Services.AddSingleton<WSClient>();
             builder.Services.AddSingleton<LogQueue>();
+            builder.Services.AddSingleton<PendingJobReturn>();
             builder.Services.AddSingleton<ExecuteJob>();
             builder.Services.AddHostedService<RequestBindBackground>();
             builder.Services.AddHostedService<SendLogsBackground>();

@@ -32,11 +32,18 @@ namespace Zapqio.Runner.Background
 
         private int _loopErrors;
 
-        public RequestBindBackground(WSClient client, ILogger<RequestBindBackground> logger, IServiceProvider serviceProvider)
+        private readonly PendingJobReturn _pending;
+
+        public RequestBindBackground(
+            WSClient client,
+            ILogger<RequestBindBackground> logger,
+            IServiceProvider serviceProvider,
+            PendingJobReturn pending)
         {
             _client = client;
             _logger = logger;
             _serviceProvider = serviceProvider;
+            _pending = pending;
         }
         /// <summary>
         /// Uzgodnienie zamknięcia idzie przed anulowaniem pętli. Anulowanie trwającego ReceiveAsync
@@ -66,6 +73,12 @@ namespace Zapqio.Runner.Background
                     }
                     _failedConnects = 0;
                     await FirstConnectedAsync();
+                    // Tylko po faktycznym powrocie: Connect() w zwykłym obrocie pętli zastaje gniazdo
+                    // otwarte i nic nie nawiązuje, a wynik wysłany chwilę temu nie jest do ponowienia.
+                    if (connect.Established)
+                    {
+                        await ResendPendingResultAsync();
+                    }
                     WebSocketReceiveResult result;
                     using var ms = new MemoryStream();
                     var buff = new byte[1024];
@@ -93,6 +106,10 @@ namespace Zapqio.Runner.Background
                     ms.Position = 0;
                     var json = Encoding.UTF8.GetString(ms.ToArray());
                     var message = JsonSerializer.Deserialize<Message>(json, JsonDefaults.Options);
+
+                    // Cokolwiek przyszło od platformy dowodzi, że połączenie żyło po ostatniej
+                    // wysyłce wyniku - nie ma czego ponawiać (patrz PendingJobReturn).
+                    _pending.Confirm();
 
                     if (message != null)
                     {
@@ -174,6 +191,34 @@ namespace Zapqio.Runner.Background
                 return;
             }
             _runMethodFirstConnected = await _client.SendInfo();
+        }
+
+        /// <summary>
+        /// Wynik, który nie doszedł (albo nie wiadomo, czy doszedł), idzie zaraz po nawiązaniu
+        /// połączenia, przed odczytem czegokolwiek - z tym samym <c>attemptId</c>, żeby platforma
+        /// rozpoznała próbę (§5.5 protokołu). Po udanej wysyłce runner zgłasza gotowość, bo w tej
+        /// chwili nic nie wykonuje. Nieudana wysyłka zostawia wynik na następny obrót pętli.
+        /// </summary>
+        private async Task ResendPendingResultAsync()
+        {
+            var pending = _pending.Peek();
+            if (pending is null)
+            {
+                return;
+            }
+
+            _logger.LogInformation(
+                "Ponawiam JobReturn ({Status}) zadania {JobId}, próba {AttemptId}, po ponownym połączeniu",
+                pending.Status, pending.Id, pending.AttemptId);
+
+            if (!await _client.SendJobReturn(pending.Id, pending.AttemptId, pending.Status, pending.Data))
+            {
+                _logger.LogWarning("Ponowienie JobReturn zadania {JobId} nie powiodło się - zostaje na kolejne połączenie", pending.Id);
+                return;
+            }
+
+            _pending.MarkSent(pending);
+            await _client.SendQueryOnJob();
         }
         private async Task Handle(Message message)
         {

@@ -14,4 +14,5 @@
   <Project Path="Zapqio.Runner.Protocol.Tests/Zapqio.Runner.Protocol.Tests.csproj" />
   <Project Path="Zapqio.Runner.Module.Core/Zapqio.Runner.Module.Core.csproj" />
   <Project Path="Zapqio.Runner/Zapqio.Runner.csproj" />
+  <Project Path="Zapqio.Runner.Tests/Zapqio.Runner.Tests.csproj" />
 </Solution>
