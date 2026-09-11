@@ -28,6 +28,7 @@ public class FixtureConsumptionTests
 
     [Theory]
     [InlineData("info.json", MessageType.Info)]
+    [InlineData("info-sequential.json", MessageType.Info)]
     [InlineData("job-poll.json", MessageType.Job)]
     [InlineData("job-dispatch.json", MessageType.Job)]
     [InlineData("job-accepted.json", MessageType.JobAccepted)]
@@ -49,6 +50,7 @@ public class FixtureConsumptionTests
         var info = Decode<MessageInfo>("info.json", MessageType.Info);
 
         Assert.Equal("build-agent-01", info.Name);
+        Assert.Equal(4, info.MaxConcurrency);
         var method = Assert.Single(info.Methods);
         Assert.Equal("resize-image", method.Name);
 
@@ -65,6 +67,20 @@ public class FixtureConsumptionTests
         Assert.Equal(
             "string",
             outputSchema.RootElement.GetProperty("properties").GetProperty("url").GetProperty("type").GetString());
+    }
+
+    /// <summary>
+    /// A runner from before the maxConcurrency field (or one that runs a single job at a time) does
+    /// not send it - a consumer MUST read that as capacity 1 (§5.1, §9).
+    /// </summary>
+    [Fact]
+    public void Info_without_maxConcurrency_means_one_job_at_a_time()
+    {
+        var info = Decode<MessageInfo>("info-sequential.json", MessageType.Info);
+
+        Assert.Equal("build-agent-01", info.Name);
+        Assert.Single(info.Methods);
+        Assert.Equal(1, info.MaxConcurrency);
     }
 
     [Fact]

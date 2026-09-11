@@ -1,13 +1,20 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using Zapqio.Runner.Background;
 using Zapqio.Runner.Protocol;
 using Zapqio.Runner.Protocol.Enums;
 
 namespace Zapqio.Runner
 {
-    public class WSClient : IAsyncDisposable
+    /// <summary>
+    /// Gniazdo do platformy. Uzgodnienie i odczyt wołane są z pętli połączenia; każdy zapis idzie
+    /// przez <see cref="Outbox"/> i wykonuje go wyłącznie <see cref="OutboundSender"/> (stąd
+    /// <see cref="IOutboundTransport"/>) - <c>ClientWebSocket.SendAsync</c> nie dopuszcza dwóch
+    /// zapisów naraz, a przy kilku zadaniach piszą z kilku wątków.
+    /// </summary>
+    public class WSClient : IAsyncDisposable, IOutboundTransport
     {
         /// <summary>
         /// Wynik próby uzgodnienia. Odmowa nie jest wyjątkiem - dla pętli głównej liczy się tylko to,
@@ -32,6 +39,7 @@ namespace Zapqio.Runner
         private readonly AppSettings _settings;
         private readonly ILogger<WSClient> _logger;
         private readonly MethodsProvider _methodsProvider;
+        private readonly Outbox _outbox;
         ClientWebSocket _client;
 
         public List<MessageMethod> Methods { get; private set; }
@@ -39,11 +47,12 @@ namespace Zapqio.Runner
 
         public Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffor, CancellationToken cancellationToken) => _client.ReceiveAsync(buffor, cancellationToken);
 
-        public WSClient(AppSettings settings, ILogger<WSClient> logger, MethodsProvider methodsProvider)
+        public WSClient(AppSettings settings, ILogger<WSClient> logger, MethodsProvider methodsProvider, Outbox outbox)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _methodsProvider = methodsProvider;
+            _outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
             try
             {
                 _client = new ClientWebSocket();
@@ -188,25 +197,28 @@ namespace Zapqio.Runner
 
             return TimeSpan.FromSeconds(Math.Min(seconds, MaxRetryAfterSeconds));
         }
-        private async Task<bool> SendMessage(MessageType type, object data)
+
+        /// <inheritdoc/>
+        public bool IsConnected => Connected();
+
+        /// <summary>
+        /// Zapis jednej ramki do gniazda. Woła to wyłącznie <see cref="OutboundSender"/> - wszyscy
+        /// inni kolejkują przez <see cref="Outbox"/>, inaczej dwa zapisy naraz wywróciłyby gniazdo.
+        /// </summary>
+        public async Task<bool> WriteAsync(Message message)
         {
             try
             {
-                var m = new Message
-                {
-                    Type = type,
-                    Data = data == null ? null : (data is string ? data as string : JsonSerializer.Serialize(data, JsonDefaults.Options))
-                };
                 if (_client.State == WebSocketState.Open)
                 {
-                    var buff = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(m, JsonDefaults.Options));
+                    var buff = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(message, JsonDefaults.Options));
 
                     var cancel = new CancellationTokenSource(10000);
                     await _client.SendAsync(buff, WebSocketMessageType.Text, true, cancel.Token);
                 }
                 else
                 {
-                    _logger.LogWarning($"Cannot send message of type {type}, WebSocket is not open. State: {_client.State}");
+                    _logger.LogWarning($"Cannot send message of type {message.Type}, WebSocket is not open. State: {_client.State}");
                     //nic nie poszło w gniazdo, więc to nie jest sukces - inaczej wołający uzna, że platforma dostała wiadomość
                     return false;
                 }
@@ -214,44 +226,49 @@ namespace Zapqio.Runner
             }
             catch (OperationCanceledException)
             {
-                _logger.LogWarning($"Sending message of type {type} timed out");
+                _logger.LogWarning($"Sending message of type {message.Type} timed out");
                 return false;
             }
             catch (WebSocketException ex)
             {
-                _logger.LogError(ex, $"WebSocket error while sending message of type {type}");
+                _logger.LogError(ex, $"WebSocket error while sending message of type {message.Type}");
                 return false;
             }
             catch (ObjectDisposedException)
             {
-                _logger.LogError($"WebSocket was disposed while trying to send message of type {type}");
+                _logger.LogError($"WebSocket was disposed while trying to send message of type {message.Type}");
                 return false;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, $"Unexpected error while sending message of type {type}");
+                _logger.LogError(ex, $"Unexpected error while sending message of type {message.Type}");
                 return false;
             }
         }
-        public Task<bool> SendQueryOnJob()
+
+        /// <summary>Odpytanie o zadanie: „mam wolne miejsce". Wyślij i zapomnij - platforma i tak sama rozsyła co obrót.</summary>
+        public Task SendQueryOnJob()
         {
-            return SendMessage(MessageType.Job, null);
+            _outbox.Enqueue(Outbox.Frame(MessageType.Job, null));
+            return Task.CompletedTask;
         }
+
         /// <summary>
-        /// Potwierdza odbiór przydziału (§5.3). Wołane natychmiast po odebraniu zadania, przed logiem
-        /// startowym - platforma bez tego zwróci zadanie do kolejki po upływie terminu.
+        /// Potwierdza odbiór przydziału (§5.3). Kolejkowane natychmiast po odebraniu zadania, przed
+        /// logiem startowym - platforma bez tego zwróci zadanie do kolejki po upływie terminu.
         /// </summary>
-        public Task<bool> SendJobAccepted(Guid id, Guid attemptId)
+        public Task SendJobAccepted(Guid id, Guid attemptId)
         {
-            var m = new MessageJobAccepted
+            _outbox.Enqueue(Outbox.Frame(MessageType.JobAccepted, new MessageJobAccepted
             {
                 Id = id,
                 AttemptId = attemptId
-            };
-            return SendMessage(MessageType.JobAccepted, m);
+            }));
+            return Task.CompletedTask;
         }
 
-        public Task<bool> SendJobReturn(Guid Id, Guid attemptId, MessageResponseStatus status, string data)
+        /// <summary>Wynik zadania: numer sekwencji zapisu albo <c>null</c>, gdy nie wyszedł (patrz <see cref="PendingJobReturns"/>).</summary>
+        public Task<long?> SendJobReturn(Guid Id, Guid attemptId, MessageResponseStatus status, string data)
         {
             var m = new MessageJobReturn
             {
@@ -260,17 +277,25 @@ namespace Zapqio.Runner
                 AttemptId = attemptId,
                 Status = status
             };
-            return SendMessage(MessageType.JobReturn, m);
+            return _outbox.SendAndWaitAsync(Outbox.Frame(MessageType.JobReturn, m));
         }
-        public Task<bool> SendLogs(MessageLog log)
-        {
-            return SendMessage(MessageType.Log, log);
-        }
+
+        /// <summary>Linia logu zadania - kolejkowana, wysyłana w tle, przy odciętym Web czeka na powrót gniazda.</summary>
+        public void SendLog(MessageLog log) => _outbox.EnqueueLog(log);
+
+        /// <summary>
+        /// Log startowy: metoda rusza dopiero, gdy ta linia faktycznie wyszła z gniazda. Przy
+        /// zamkniętym gnieździe kończy się od razu fałszem, a wykonanie jest odwoływane - inaczej
+        /// metoda ruszyłaby po powrocie, gdy platforma dawno zwróciła zadanie do kolejki.
+        /// </summary>
+        public async Task<bool> SendLogAndWaitAsync(MessageLog log) =>
+            await _outbox.SendAndWaitAsync(Outbox.Frame(MessageType.Log, log)) is not null;
+
         public bool Connected()
         {
             return _client?.State == WebSocketState.Open;
         }
-        public Task<bool> SendInfo()
+        public async Task<bool> SendInfo()
         {
             var l = new List<MessageMethod>();
             var methods = _methodsProvider.GetMethods();
@@ -287,7 +312,10 @@ namespace Zapqio.Runner
             var i = new MessageInfo
             {
                 Methods = l,
-                Name = _settings.Name
+                Name = _settings.Name,
+                // Pojemność ogłasza runner, bo to on wie, ile zadań uniesie (§5.1) - Web nie ma
+                // własnego limitu, przyjmuje tę liczbę i najwyżej przycina od góry.
+                MaxConcurrency = _settings.MaxConcurrency
             };
 
             // Lista idzie do logu, bo "runner w panelu bez metod" to najczęstszy objaw problemu z modułami,
@@ -300,11 +328,11 @@ namespace Zapqio.Runner
             else
             {
                 _logger.LogInformation(
-                    "Wysyłam Info: {Count} metod: {Methods}",
-                    l.Count, string.Join(", ", l.Select(x => x.Name)));
+                    "Wysyłam Info: {Count} metod: {Methods}; pojemność {MaxConcurrency}",
+                    l.Count, string.Join(", ", l.Select(x => x.Name)), i.MaxConcurrency);
             }
 
-            return SendMessage(MessageType.Info, i);
+            return await _outbox.SendAndWaitAsync(Outbox.Frame(MessageType.Info, i)) is not null;
         }
         /// <summary>
         /// Zamyka gniazdo uzgodnieniem - ramka Close w obie strony - żeby platforma od razu wiedziała,

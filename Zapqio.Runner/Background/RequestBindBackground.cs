@@ -1,4 +1,4 @@
-﻿using System.Net.WebSockets;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Zapqio.Runner.Protocol;
@@ -6,13 +6,22 @@ using Zapqio.Runner.Protocol.Enums;
 
 namespace Zapqio.Runner.Background
 {
+    /// <summary>
+    /// Pętla połączenia: uzgodnienie, <c>Info</c>, ponowienie zaległych wyników, odczyt gniazda.
+    /// Odebrany przydział trafia do <see cref="JobScheduler"/> i pętla natychmiast wraca do odczytu -
+    /// gniazdo jest czytane zawsze, także gdy wszystkie sloty pracują. Zapisy idą przez
+    /// <see cref="Outbox"/> i <see cref="OutboundSender"/>.
+    /// </summary>
     public class RequestBindBackground : BackgroundService
     {
         private readonly WSClient _client;
         private readonly ILogger<RequestBindBackground> _logger;
-        private readonly IServiceProvider _serviceProvider;
+        private readonly PendingJobReturns _pending;
+        private readonly JobScheduler _scheduler;
+        private readonly Outbox _outbox;
+        private readonly OutboundSender _sender;
+        private readonly AppSettings _settings;
         private bool _runMethodFirstConnected = false;
-        private volatile bool _executingJob = false;
 
         /// <summary>Ustawiane w <see cref="StopAsync"/>, zanim host anuluje pętlę - żeby po zamknięciu gniazda nie próbowała się łączyć na nowo.</summary>
         private volatile bool _stopping = false;
@@ -32,20 +41,31 @@ namespace Zapqio.Runner.Background
 
         private int _loopErrors;
 
-        private readonly PendingJobReturn _pending;
-
         public RequestBindBackground(
             WSClient client,
             ILogger<RequestBindBackground> logger,
-            IServiceProvider serviceProvider,
-            PendingJobReturn pending)
+            PendingJobReturns pending,
+            JobScheduler scheduler,
+            Outbox outbox,
+            OutboundSender sender,
+            AppSettings settings)
         {
             _client = client;
             _logger = logger;
-            _serviceProvider = serviceProvider;
             _pending = pending;
+            _scheduler = scheduler;
+            _outbox = outbox;
+            _sender = sender;
+            _settings = settings;
         }
+
         /// <summary>
+        /// Łagodne zatrzymanie, w tej kolejności: nic nowego nie rusza; trwające zadania kończą się
+        /// (do <c>StopTimeoutSeconds</c>); ich wyniki i logi wychodzą z kolejki; dopiero potem
+        /// uzgodnienie zamknięcia gniazda i anulowanie pętli. Zadania, które czekały w kolejce
+        /// planisty, przepadają - są w <c>Dispatched</c>, więc platforma zwróci je do kolejki, gdy
+        /// zobaczy zamknięte gniazdo.
+        ///
         /// Uzgodnienie zamknięcia idzie przed anulowaniem pętli. Anulowanie trwającego ReceiveAsync
         /// zrywa gniazdo bez ramki Close (stan Aborted), przez co DisposeAsync klienta nie ma już
         /// czego zamykać, a platforma dowiaduje się o odejściu runnera dopiero, gdy wykryje martwe
@@ -55,8 +75,37 @@ namespace Zapqio.Runner.Background
         public override async Task StopAsync(CancellationToken cancellationToken)
         {
             _stopping = true;
+            _scheduler.CompleteAdding();
+
+            var timeout = TimeSpan.FromSeconds(_settings.StopTimeoutSeconds);
+            if (_scheduler.Running > 0)
+            {
+                _logger.LogInformation(
+                    "Zatrzymywanie: czekam do {Timeout}s na {Running} zadań w toku",
+                    timeout.TotalSeconds, _scheduler.Running);
+
+                if (!await _scheduler.WaitForRunningAsync(timeout, cancellationToken))
+                {
+                    _logger.LogWarning(
+                        "Zatrzymywanie: {Running} zadań nie skończyło się w {Timeout}s - ich wyniki przepadną z procesem, platforma zamknie je jako wynik nieznany",
+                        _scheduler.Running, timeout.TotalSeconds);
+                }
+            }
+
+            await WaitForOutboxAsync(timeout);
             await _client.CloseAsync(cancellationToken);
             await base.StopAsync(cancellationToken);
+        }
+
+        /// <summary>Czeka, aż nadawca wyśle wszystko, co zakolejkowano - dopóki gniazdo żyje i mieści się w limicie.</summary>
+        private async Task WaitForOutboxAsync(TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow + timeout;
+            while (!_sender.IsDrained && _client.Connected() && DateTime.UtcNow < deadline)
+                await Task.Delay(100);
+
+            if (!_sender.IsDrained)
+                _logger.LogWarning("Zatrzymywanie: kolejka wyjściowa nie została opróżniona - część wiadomości do platformy przepada");
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -77,7 +126,12 @@ namespace Zapqio.Runner.Background
                     // otwarte i nic nie nawiązuje, a wynik wysłany chwilę temu nie jest do ponowienia.
                     if (connect.Established)
                     {
-                        await ResendPendingResultAsync();
+                        await ResendPendingResultsAsync();
+
+                        // Runner po powrocie ma wolne sloty - zgłasza gotowość od razu, zamiast czekać
+                        // na najbliższy obrót dyspozytora po stronie platformy.
+                        if (_scheduler.FreeSlots > 0)
+                            await _client.SendQueryOnJob();
                     }
                     WebSocketReceiveResult result;
                     using var ms = new MemoryStream();
@@ -107,13 +161,13 @@ namespace Zapqio.Runner.Background
                     var json = Encoding.UTF8.GetString(ms.ToArray());
                     var message = JsonSerializer.Deserialize<Message>(json, JsonDefaults.Options);
 
-                    // Cokolwiek przyszło od platformy dowodzi, że połączenie żyło po ostatniej
-                    // wysyłce wyniku - nie ma czego ponawiać (patrz PendingJobReturn).
-                    _pending.Confirm();
+                    // Cokolwiek przyszło od platformy dowodzi, że połączenie żyło po wysyłkach o
+                    // niższym numerze sekwencji - te wyniki nie są już do ponawiania (patrz PendingJobReturns).
+                    _pending.Confirm(_outbox.NextSeq());
 
                     if (message != null)
                     {
-                        await Handle(message);
+                        Handle(message);
                     }
 
                     _loopErrors = 0;
@@ -194,68 +248,61 @@ namespace Zapqio.Runner.Background
         }
 
         /// <summary>
-        /// Wynik, który nie doszedł (albo nie wiadomo, czy doszedł), idzie zaraz po nawiązaniu
-        /// połączenia, przed odczytem czegokolwiek - z tym samym <c>attemptId</c>, żeby platforma
-        /// rozpoznała próbę (§5.5 protokołu). Po udanej wysyłce runner zgłasza gotowość, bo w tej
-        /// chwili nic nie wykonuje. Nieudana wysyłka zostawia wynik na następny obrót pętli.
+        /// Wyniki, które nie doszły (albo nie wiadomo, czy doszły), idą zaraz po nawiązaniu
+        /// połączenia, przed odczytem czegokolwiek - każdy z tym samym <c>attemptId</c>, żeby platforma
+        /// rozpoznała próbę (§5.5 protokołu). Nieudana wysyłka zostawia wynik na następne połączenie.
         /// </summary>
-        private async Task ResendPendingResultAsync()
+        private async Task ResendPendingResultsAsync()
         {
-            var pending = _pending.Peek();
-            if (pending is null)
+            var pending = _pending.PeekAll();
+            if (pending.Count == 0)
             {
                 return;
             }
 
-            _logger.LogInformation(
-                "Ponawiam JobReturn ({Status}) zadania {JobId}, próba {AttemptId}, po ponownym połączeniu",
-                pending.Status, pending.Id, pending.AttemptId);
-
-            if (!await _client.SendJobReturn(pending.Id, pending.AttemptId, pending.Status, pending.Data))
+            foreach (var result in pending)
             {
-                _logger.LogWarning("Ponowienie JobReturn zadania {JobId} nie powiodło się - zostaje na kolejne połączenie", pending.Id);
-                return;
-            }
+                _logger.LogInformation(
+                    "Ponawiam JobReturn ({Status}) zadania {JobId}, próba {AttemptId}, po ponownym połączeniu",
+                    result.Status, result.Id, result.AttemptId);
 
-            _pending.MarkSent(pending);
-            await _client.SendQueryOnJob();
+                var sentSeq = await _client.SendJobReturn(result.Id, result.AttemptId, result.Status, result.Data);
+                if (sentSeq is null)
+                {
+                    _logger.LogWarning("Ponowienie JobReturn zadania {JobId} nie powiodło się - zostaje na kolejne połączenie", result.Id);
+                    continue;
+                }
+
+                _pending.MarkSent(result, sentSeq.Value);
+            }
         }
-        private async Task Handle(Message message)
+        private void Handle(Message message)
         {
             switch (message.Type)
             {
                 case MessageType.Job:
-                    await HandleJob(message);
+                    HandleJob(message);
                     break;
                 default:
                     break;
             }
         }
-        private async Task HandleJob(Message message)
+        private void HandleJob(Message message)
         {
-            if (_executingJob)
+            var job = JsonSerializer.Deserialize<MessageJob>(message.Data, JsonDefaults.Options);
+            if (job is null)
             {
+                _logger.LogWarning("Odebrano przydział bez treści - pominięty");
                 return;
             }
-            try
-            {
-                _executingJob = true;
-                using var scope = _serviceProvider.CreateScope();
-                var exec = scope.ServiceProvider.GetService<ExecuteJob>();
-                var m = JsonSerializer.Deserialize<MessageJob>(message.Data, JsonDefaults.Options);
 
-                // Potwierdzenie idzie przed czymkolwiek innym (§5.3). Platforma liczy termin od
-                // wysłania przydziału, więc każda praca wykonana wcześniej - choćby log startowy -
-                // zjada budżet, po którym zadanie wróci do kolejki i zostanie wysłane drugi raz.
-                await _client.SendJobAccepted(m.Id, m.AttemptId);
-
-                await exec.Exec(m);
-            }
-            finally
+            // Tylko przekazanie do planisty: potwierdzenie (§5.3), slot i wykonanie są jego sprawą,
+            // a ta pętla ma wrócić do gniazda, zanim platforma wyśle cokolwiek więcej.
+            if (!_scheduler.Enqueue(job))
             {
-                await Task.Delay(1000);
-                _executingJob = false;
-                await _client.SendQueryOnJob();
+                _logger.LogWarning(
+                    "Przydział {JobId} odrzucony - runner się zatrzymuje; platforma zwróci go do kolejki",
+                    job.Id);
             }
         }
     }

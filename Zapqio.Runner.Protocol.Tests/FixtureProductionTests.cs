@@ -24,6 +24,7 @@ public class FixtureProductionTests
         var frame = Wire.Frame(MessageType.Info, new MessageInfo
         {
             Name = "build-agent-01",
+            MaxConcurrency = 4,
             Methods =
             [
                 new MessageMethod

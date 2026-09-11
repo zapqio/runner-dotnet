@@ -7,12 +7,12 @@ namespace Zapqio.Runner
     {
         private readonly ScopedTextWriter _out;
         private readonly ScopedTextWriter _error;
-        private readonly LogQueue _logQueue;
+        private readonly Outbox _outbox;
         private readonly ILoggerFactory _loggerFactory;
 
-        public ScopedConsole(LogQueue logQueue, ILoggerFactory loggerFactory)
+        public ScopedConsole(Outbox outbox, ILoggerFactory loggerFactory)
         {
-            _logQueue = logQueue;
+            _outbox = outbox;
             _loggerFactory = loggerFactory;
             _out = new ScopedTextWriter(Console.Out, Send);
             _error = new ScopedTextWriter(Console.Error, SendErr);
@@ -25,7 +25,7 @@ namespace Zapqio.Runner
             {
                 return;
             }
-            _logQueue.AddLog(new MessageLog
+            _outbox.EnqueueLog(new MessageLog
             {
                 Date = DateTimeOffset.Now,
                 JobId = message.Id,
@@ -41,7 +41,7 @@ namespace Zapqio.Runner
             {
                 return;
             }
-            _logQueue.AddLog(new MessageLog
+            _outbox.EnqueueLog(new MessageLog
             {
                 Date = DateTimeOffset.Now,
                 JobId = message.Id,

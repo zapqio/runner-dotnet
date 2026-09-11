@@ -4,26 +4,31 @@ using Zapqio.Runner.Protocol.Enums;
 
 namespace Zapqio.Runner
 {
+    /// <summary>
+    /// Wykonanie jednego przydziału. Wołane przez <see cref="JobScheduler"/> na osobnym wątku, dla
+    /// kilku zadań naraz - nie trzyma żadnego stanu między wywołaniami, a wszystko, co idzie do
+    /// platformy, przechodzi przez kolejkę wyjściową.
+    /// </summary>
     public class ExecuteJob
     {
         private readonly WSClient _client;
-        private readonly LogQueue _logQueue;
         private readonly ScopedConsole _scopedConsole;
         private readonly MethodsProvider _methodsProvider;
-        private readonly PendingJobReturn _pending;
+        private readonly PendingJobReturns _pending;
+        private readonly ILogger<ExecuteJob> _logger;
 
         public ExecuteJob(
             WSClient client,
-            LogQueue logQueue,
             ScopedConsole scopedConsole,
             MethodsProvider methodsProvider,
-            PendingJobReturn pending)
+            PendingJobReturns pending,
+            ILogger<ExecuteJob> logger)
         {
             _client = client;
-            _logQueue = logQueue;
             _scopedConsole = scopedConsole;
             _methodsProvider = methodsProvider;
             _pending = pending;
+            _logger = logger;
         }
 
         public async Task Exec(MessageJob message)
@@ -33,7 +38,7 @@ namespace Zapqio.Runner
             string outData = null;
             if (method == null)
             {
-                _logQueue.AddLog(new MessageLog
+                _client.SendLog(new MessageLog
                 {
                     Date = DateTimeOffset.Now,
                     Level = MessageLogLevel.Error,
@@ -47,7 +52,11 @@ namespace Zapqio.Runner
             {
                 try
                 {
-                    var logStatus = await _client.SendLogs(new MessageLog
+                    // Log startowy PRZED metodą, i to faktycznie wysłany: to on przestawia zadanie po
+                    // stronie platformy na Executing (skutek mógł nastąpić). Gdy nie wyszedł, zadanie
+                    // zostaje w Dispatched (nic się nie wykonało) i platforma zwróci je do kolejki -
+                    // uruchomienie metody mimo to skończyłoby się podwójnym wykonaniem.
+                    var started = await _client.SendLogAndWaitAsync(new MessageLog
                     {
                         Date = DateTimeOffset.Now,
                         Level = MessageLogLevel.Info,
@@ -55,8 +64,11 @@ namespace Zapqio.Runner
                         AttemptId = message.AttemptId,
                         Message = $"Run Job: {DateTimeOffset.Now:s}"
                     });
-                    if (!logStatus)
+                    if (!started)
                     {
+                        _logger.LogWarning(
+                            "Log startowy zadania {JobId} (próba {AttemptId}) nie wyszedł - zadanie nie rusza, platforma zwróci je do kolejki",
+                            message.Id, message.AttemptId);
                         return;
                     }
 
@@ -75,7 +87,7 @@ namespace Zapqio.Runner
                 }
                 catch (Exception ex)
                 {
-                    _logQueue.AddLog(new MessageLog
+                    _client.SendLog(new MessageLog
                     {
                         Date = DateTimeOffset.Now,
                         Level = MessageLogLevel.Error,
@@ -95,19 +107,19 @@ namespace Zapqio.Runner
                 Data = status ? outData : null
             };
 
-            var returnSent = await _client.SendJobReturn(result.Id, result.AttemptId, result.Status, result.Data);
-            if (returnSent)
+            var sentSeq = await _client.SendJobReturn(result.Id, result.AttemptId, result.Status, result.Data);
+            if (sentSeq is { } seq)
             {
                 // Poszło, ale bez potwierdzenia: zostaje do ponowienia, gdyby połączenie okazało się
-                // martwe, zanim platforma da znak życia (patrz PendingJobReturn).
-                _pending.MarkSent(result);
+                // martwe, zanim platforma da znak życia (patrz PendingJobReturns).
+                _pending.MarkSent(result, seq);
                 return;
             }
 
             // Wynik nie przepadł: host wyśle go po ponownym połączeniu z tym samym attemptId, a
             // platforma przyjmie, jeśli wciąż trzyma zadanie jako „wynik nieznany" (§5.5 protokołu).
             _pending.MarkFailed(result);
-            _logQueue.AddLog(new MessageLog
+            _client.SendLog(new MessageLog
             {
                 Date = DateTimeOffset.Now,
                 Level = MessageLogLevel.Error,

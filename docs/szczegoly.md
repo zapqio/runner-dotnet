@@ -16,6 +16,9 @@ Konfiguracja w pliku `appsettings.json` obok binarki lub przez zmienne środowis
 | `Url` | `ZAPQIO_URL` | Adres instancji Web **bez** sufiksu `/ws-runner` — runner dokleja go sam. |
 | `Logger:LogLevel` | `Logger__LogLevel` | Poziom logowania: `Verbose`, `Debug`, `Information`, `Warning`, `Error`, `Fatal` (domyślnie `Information`). |
 | `Logger:PathDirectory` | `Logger__PathDirectory` | Katalog logów (domyślnie `Logs` obok binarki); pusty = brak zapisu do pliku. |
+| `MaxConcurrency` | `ZAPQIO_MAX_CONCURRENCY` | Ile zadań runner wykonuje naraz (domyślnie `1`, czyli jedno po drugim). Wyższa wartość ma sens wyłącznie dla modułów gotowych na równoległe wywołania `Run`, także tej samej metody na tej samej instancji — runner nie dodaje żadnej synchronizacji, o tym decyduje twórca modułu. To jedyne miejsce, w którym pojemność się ustawia: runner ogłasza ją platformie przy połączeniu, a panel **Runnery** pokazuje ją tylko do odczytu. Platforma przycina wartości powyżej 32. |
+| `StopTimeoutSeconds` | `StopTimeoutSeconds` | Ile sekund przy zatrzymaniu usługi runner czeka na zadania w toku i wysyłkę ich wyników, zanim zamknie połączenie (domyślnie `30`). Po tym czasie zadania są porzucane, a platforma zamyka je jako „wynik nieznany". Menedżer usług Windows ma własny limit na zatrzymanie usługi, zwykle krótszy — dłuższe zadania mogą go przekroczyć. |
+| `MaxQueuedLogLines` | `MaxQueuedLogLines` | Ile linii logu zadań może czekać na wysyłkę, gdy platforma jest niedostępna (domyślnie `10000`). Ponad limit kolejne linie są pomijane, a w logu zadania pojawia się jedna linia ostrzegawcza. |
 
 **Adres instancji.** Nazwa instancji jest częścią adresu, a nie hosta — instancje stoją pod wspólnym
 hostem i rozróżnia je segment ścieżki wybrany przy zakładaniu instancji:
@@ -38,9 +41,16 @@ Przykładowy `appsettings.json`:
   },
   "Token": "<TOKEN-Z-PANELU-WEB>",
   "Name": "moj-runner-01",
-  "Url": "wss://app.zapq.io/moja-instancja"
+  "Url": "wss://app.zapq.io/moja-instancja",
+  "MaxConcurrency": 1
 }
 ```
+
+**Kilka zadań naraz.** Domyślnie runner wykonuje zadania jedno po drugim. Żeby wykonywał kilka
+naraz, ustaw `MaxConcurrency` i zrestartuj runnera — nowa pojemność idzie do platformy przy
+połączeniu i od tej chwili platforma wysyła najwyżej tyle zadań naraz. Nic nie trzeba zmieniać w
+panelu. Zanim to zrobisz, upewnij się, że moduły na tym runnerze są gotowe na równoległe wywołania:
+metoda jest jedną instancją na proces i będzie wołana z kilku wątków naraz.
 
 **Test w konsoli przed założeniem usługi.** Zanim runner trafi pod menedżera usług, uruchom go
 ręcznie **z katalogu instalacji**:
