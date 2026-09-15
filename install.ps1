@@ -13,8 +13,9 @@
     NT SERVICE\<usługa> z prawem zapisu ograniczonym do katalogu instalacji
     (chyba że podano -LocalSystem).
 
-    O brakującą nazwę instancji i token pyta interaktywnie, zapisuje konfigurację
-    w appsettings.json, a po starcie usługi czeka, aż w logu pojawi się
+    O brakującą nazwę instancji i token pyta interaktywnie; przy nowej instalacji
+    pyta też o liczbę równoczesnych zadań. Zapisuje konfigurację w appsettings.json,
+    a po starcie usługi czeka, aż w logu pojawi się
     potwierdzenie nawiązania połączenia WebSocket z instancją Web.
 
     Uruchomiony na istniejącej instalacji działa jak aktualizacja: zatrzymuje
@@ -48,6 +49,12 @@
     Stabilna nazwa runnera (klucz Name). Pusta = runner wygeneruje UUID przy
     pierwszym starcie i zapisze go w pliku ##Name.
 
+.PARAMETER MaxConcurrency
+    Maksymalna liczba zadań wykonywanych równocześnie (co najmniej 1).
+    Nowa instalacja domyślnie używa 1; instalacja interaktywna pyta o wartość.
+    Aktualizacja bez tego parametru zachowuje dotychczasowe ustawienie.
+    Parametr ustawia również wartość dla usługi, jeśli nadpisuje ją środowisko.
+
 .PARAMETER LogLevel
     Poziom logowania (klucz Logger:LogLevel): Verbose, Debug, Information,
     Warning, Error albo Fatal. Domyślnie runner używa Information.
@@ -70,6 +77,9 @@
 
 .EXAMPLE
     .\install.ps1 -Instance test -Token <token>
+
+.EXAMPLE
+    .\install.ps1 -Instance test -Token <token> -MaxConcurrency 15
 
 .EXAMPLE
     .\install.ps1 -Version 0.1.1 -InstallDir D:\zapqio\runner
@@ -111,6 +121,8 @@ param(
     [string]$Url,
     [string]$Token,
     [string]$RunnerName,
+    [ValidateRange(1, 2147483647)]
+    [int]$MaxConcurrency,
     [ValidateSet('Verbose', 'Debug', 'Information', 'Warning', 'Error', 'Fatal')]
     [string]$LogLevel,
     [string]$LogDirectory,
@@ -260,7 +272,8 @@ try {
 
     # Paczkowy appsettings.json zawiera komentarze (JSONC), więc zamiast niego
     # utrzymujemy czysty JSON, który można potem programowo aktualizować.
-    if (-not (Test-Path $appsettingsPath)) {
+    $hadConfig = Test-Path $appsettingsPath
+    if (-not $hadConfig) {
         @'
 {
   "Logger": {
@@ -269,7 +282,8 @@ try {
   },
   "Token": "",
   "Name": "",
-  "Url": ""
+  "Url": "",
+  "MaxConcurrency": 1
 }
 '@ | Set-Content -Path $appsettingsPath -Encoding UTF8
     }
@@ -278,6 +292,8 @@ try {
     if ($Token)      { $overrides['Token'] = $Token }
     if ($Url)        { $overrides['Url'] = $Url }
     if ($RunnerName) { $overrides['Name'] = $RunnerName }
+    $setMaxConcurrency = $PSBoundParameters.ContainsKey('MaxConcurrency')
+    if ($setMaxConcurrency) { $overrides['MaxConcurrency'] = $MaxConcurrency }
     $loggerOverrides = @{}
     if ($LogLevel) { $loggerOverrides['LogLevel'] = $LogLevel }
     # -LogDirectory "" to jawne wyłączenie logów plikowych, więc licz się z pustą wartością
@@ -290,6 +306,7 @@ try {
     $fileName  = if ($rawConfig -match '"Name"\s*:\s*"([^"]*)"')  { $Matches[1] } else { '' }
     $serviceEnv = (Get-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName" `
         -Name Environment -ErrorAction SilentlyContinue).Environment
+    $machineMaxConcurrency = [Environment]::GetEnvironmentVariable('ZAPQIO_MAX_CONCURRENCY', 'Machine')
     $haveToken = $overrides['Token'] -or $fileToken -or ($serviceEnv -like 'ZAPQIO_TOKEN=?*') -or [Environment]::GetEnvironmentVariable('ZAPQIO_TOKEN', 'Machine')
     $haveUrl   = $overrides['Url']   -or $fileUrl   -or ($serviceEnv -like 'ZAPQIO_URL=?*')   -or [Environment]::GetEnvironmentVariable('ZAPQIO_URL', 'Machine')
 
@@ -316,6 +333,17 @@ try {
                 $answer = Read-Host 'Nazwa runnera (Enter = wygeneruje się UUID; nazwy nie da się potem zmienić)'
                 if ($answer) { $overrides['Name'] = $answer }
             }
+            if (-not $hadConfig -and -not $setMaxConcurrency) {
+                do {
+                    $answer = (Read-Host 'Maksymalna liczba równoczesnych zadań (Enter = 1)').Trim()
+                    if (-not $answer) { $answer = '1' }
+                    $parsedConcurrency = 0
+                    $validConcurrency = [int]::TryParse($answer, [ref]$parsedConcurrency) -and $parsedConcurrency -ge 1
+                    if (-not $validConcurrency) { Write-Warning 'Podaj liczbę całkowitą większą od zera.' }
+                } while (-not $validConcurrency)
+                $overrides['MaxConcurrency'] = $parsedConcurrency
+                $setMaxConcurrency = $true
+            }
         } catch {
             # sesja nieinteraktywna (brak konsoli) — niżej zostanie ostrzeżenie zamiast startu
         }
@@ -340,6 +368,9 @@ try {
             $savedKeys = @($overrides.Keys) + @($loggerOverrides.Keys | ForEach-Object { "Logger:$_" })
             Write-Host "==> Zapisano w appsettings.json: $($savedKeys -join ', ')."
         } catch {
+            if ($setMaxConcurrency) {
+                throw "Nie udało się zapisać MaxConcurrency do ${appsettingsPath}: $($_.Exception.Message)"
+            }
             $wanted = @($overrides.Keys) + @($loggerOverrides.Keys | ForEach-Object { "Logger:$_" })
             Write-Warning "Nie udało się sparsować $appsettingsPath (plik z komentarzami?). Ustaw ręcznie: $($wanted -join ', ')."
         }
@@ -359,6 +390,26 @@ try {
         if ($currentPath -and $currentPath.Trim('"') -ne $exePath) {
             Write-Host '==> Aktualizuję ścieżkę binarki w usłudze...'
             Invoke-Sc @('config', $ServiceName, 'binPath=', "`"$exePath`"")
+        }
+    }
+
+    # Program.cs nadaje ZAPQIO_MAX_CONCURRENCY pierwszeństwo przed plikiem. Jawny wybór
+    # w instalatorze musi wygrać także z poprzednim ustawieniem środowiska usługi.
+    if ($setMaxConcurrency) {
+        $hadServiceConcurrency = @($serviceEnv | Where-Object { $_ -like 'ZAPQIO_MAX_CONCURRENCY=*' }).Count -gt 0
+        if ($hadServiceConcurrency -or $machineMaxConcurrency) {
+            $serviceEnv = @($serviceEnv | Where-Object { $_ -and $_ -notlike 'ZAPQIO_MAX_CONCURRENCY=*' })
+            # Globalnego środowiska nie zmieniamy. Jeżeli narzuca wartość, nadpisz ją
+            # tylko dla tej usługi; w pozostałych przypadkach źródłem pozostaje plik.
+            if ($machineMaxConcurrency) {
+                $serviceEnv += "ZAPQIO_MAX_CONCURRENCY=$($overrides['MaxConcurrency'])"
+            }
+            $serviceKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName"
+            if ($serviceEnv.Count -gt 0) {
+                New-ItemProperty -Path $serviceKey -Name Environment -PropertyType MultiString -Value ([string[]]$serviceEnv) -Force | Out-Null
+            } else {
+                Remove-ItemProperty -Path $serviceKey -Name Environment -ErrorAction Stop
+            }
         }
     }
 
@@ -462,12 +513,27 @@ try {
 
     # --- 9. Podsumowanie -----------------------------------------------------
 
+    $effectiveConcurrency = 1
+    $parsedConcurrency = 0
+    if ($rawConfig -match '"MaxConcurrency"\s*:\s*(-?\d+)' -and [int]::TryParse($Matches[1], [ref]$parsedConcurrency)) {
+        $effectiveConcurrency = [Math]::Max(1, $parsedConcurrency)
+    }
+    $serviceConcurrency = @($serviceEnv | Where-Object { $_ -like 'ZAPQIO_MAX_CONCURRENCY=*' } | Select-Object -Last 1)
+    $environmentConcurrency = if ($serviceConcurrency.Count) { $serviceConcurrency[0].Substring('ZAPQIO_MAX_CONCURRENCY='.Length) } else { $machineMaxConcurrency }
+    if ([int]::TryParse($environmentConcurrency, [ref]$parsedConcurrency)) {
+        $effectiveConcurrency = [Math]::Max(1, $parsedConcurrency)
+    }
+
     $installedVersion = (Get-Item $exePath).VersionInfo.ProductVersion
     $status = (Get-Service -Name $ServiceName).Status
     Write-Host ''
     Write-Host "Zapqio Runner $installedVersion (.NET $runtimeMajor) — usługa $ServiceName ($status)."
     Write-Host "  Katalog: $InstallDir"
     Write-Host "  Konfiguracja: $appsettingsPath"
+    Write-Host "  Równoczesne zadania: $effectiveConcurrency"
+    if ($environmentConcurrency) {
+        Write-Host '  Limit ustala ZAPQIO_MAX_CONCURRENCY; zmienisz go instalatorem z -MaxConcurrency.'
+    }
     Write-Host "  Logi: $(if ($logsDir) { $logsDir } else { 'wyłączone (Logger:PathDirectory puste)' })"
     Write-Host "  Moduły (.zip): $(Join-Path $InstallDir 'Modules') — po zmianach zrestartuj usługę."
     Write-Host ''
