@@ -121,7 +121,13 @@ namespace Zapqio.Runner.Background
                         continue;
                     }
                     _failedConnects = 0;
+                    if (connect.Established) _runMethodFirstConnected = false;
                     await FirstConnectedAsync();
+                    if (!_runMethodFirstConnected)
+                    {
+                        await _client.CloseAsync(stoppingToken);
+                        continue;
+                    }
                     // Tylko po faktycznym powrocie: Connect() w zwykłym obrocie pętli zastaje gniazdo
                     // otwarte i nic nie nawiązuje, a wynik wysłany chwilę temu nie jest do ponowienia.
                     if (connect.Established)

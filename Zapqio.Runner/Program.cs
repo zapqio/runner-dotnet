@@ -58,6 +58,7 @@ namespace Zapqio.Runner
             builder.Services.AddSingleton<ScopedConsole>();
             builder.Services.AddSingleton<MethodsProvider>();
             builder.Services.AddSingleton<WSClient>();
+            builder.Services.AddSingleton<RunnerProcessState>();
             builder.Services.AddSingleton<IOutboundTransport>(sp => sp.GetRequiredService<WSClient>());
             builder.Services.AddSingleton<OutboundSender>();
             builder.Services.AddSingleton<PendingJobReturns>();
@@ -72,7 +73,8 @@ namespace Zapqio.Runner
                     execute.Exec,
                     job => client.SendJobAccepted(job.Id, job.AttemptId),
                     client.SendQueryOnJob,
-                    sp.GetRequiredService<ILogger<JobScheduler>>());
+                    sp.GetRequiredService<ILogger<JobScheduler>>(),
+                    sp.GetRequiredService<RunnerProcessState>());
             });
 
             // Kolejność rejestracji to odwrotność kolejności zatrzymania: pętla połączenia staje

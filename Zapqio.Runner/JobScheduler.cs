@@ -38,13 +38,15 @@ namespace Zapqio.Runner
         private readonly Func<Task> _poll;
         private readonly ILogger<JobScheduler> _logger;
         private volatile bool _closed;
+        private readonly RunnerProcessState _process;
 
         public JobScheduler(
             int maxConcurrency,
             Func<MessageJob, Task> execute,
             Func<MessageJob, Task> accept,
             Func<Task> poll,
-            ILogger<JobScheduler> logger)
+            ILogger<JobScheduler> logger,
+            RunnerProcessState? process = null)
         {
             MaxConcurrency = Math.Max(1, maxConcurrency);
             _slots = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
@@ -52,6 +54,7 @@ namespace Zapqio.Runner
             _accept = accept;
             _poll = poll;
             _logger = logger;
+            _process = process ?? new RunnerProcessState();
         }
 
         public int MaxConcurrency { get; }
@@ -68,7 +71,14 @@ namespace Zapqio.Runner
         private int _awaitingSlot;
 
         /// <summary>Fałsz po <see cref="CompleteAdding"/>: runner się zatrzymuje i nie przyjmuje nowych przydziałów.</summary>
-        public bool Enqueue(MessageJob job) => !_closed && _inbound.Writer.TryWrite(job);
+        public bool Enqueue(MessageJob job)
+        {
+            if (_closed) return false;
+            _process.Received(job.AttemptId);
+            if (_inbound.Writer.TryWrite(job)) return true;
+            _process.Completed(job.AttemptId);
+            return false;
+        }
 
         /// <summary>
         /// Zatrzymanie: nic nowego nie rusza. Zadania jeszcze niezdjęte z kolejki przepadają - są w
@@ -166,6 +176,7 @@ namespace Zapqio.Runner
                 {
                     _slots.Release();
                     _running.TryRemove(job.AttemptId, out _);
+                    _process.Completed(job.AttemptId);
                     done.TrySetResult();
                     await PollIfFreeAsync();
                 }

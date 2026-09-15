@@ -20,7 +20,7 @@ public class PayloadShapeTests
         },
         {
             "messageInfo",
-            new MessageInfo { Name = "build-agent-01", Methods = [] }
+            new MessageInfo { Name = "build-agent-01", Methods = [], ProcessInstanceId = Guid.NewGuid(), ActiveAttemptIds = [] }
         },
         {
             "messageMethod",

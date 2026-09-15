@@ -40,6 +40,8 @@ namespace Zapqio.Runner
         private readonly ILogger<WSClient> _logger;
         private readonly MethodsProvider _methodsProvider;
         private readonly Outbox _outbox;
+        private readonly RunnerProcessState _process;
+        private readonly PendingJobReturns _pending;
         ClientWebSocket _client;
 
         public List<MessageMethod> Methods { get; private set; }
@@ -47,12 +49,15 @@ namespace Zapqio.Runner
 
         public Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffor, CancellationToken cancellationToken) => _client.ReceiveAsync(buffor, cancellationToken);
 
-        public WSClient(AppSettings settings, ILogger<WSClient> logger, MethodsProvider methodsProvider, Outbox outbox)
+        public WSClient(AppSettings settings, ILogger<WSClient> logger, MethodsProvider methodsProvider, Outbox outbox,
+            RunnerProcessState process, PendingJobReturns pending)
         {
             _settings = settings ?? throw new ArgumentNullException(nameof(settings));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _methodsProvider = methodsProvider;
             _outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
+            _process = process;
+            _pending = pending;
             try
             {
                 _client = new ClientWebSocket();
@@ -64,7 +69,7 @@ namespace Zapqio.Runner
                 throw;
             }
         }
-        private static void ConfigureClient(ClientWebSocket client, AppSettings settings)
+        private void ConfigureClient(ClientWebSocket client, AppSettings settings)
         {
             try
             {
@@ -80,6 +85,7 @@ namespace Zapqio.Runner
                     client.Options.SetRequestHeader("X-Zapqio-Name", settings.Name);
                 }
                 client.Options.SetRequestHeader(ProtocolVersion.Header, ProtocolVersion.Current.ToString());
+                client.Options.SetRequestHeader(MessageInfo.ProcessInstanceHeader, _process.InstanceId.ToString());
 
                 // Bez tego po nieudanym uzgadnianiu HttpStatusCode jest 0, a HttpResponseHeaders null
                 // - 429 nie do odróżnienia od zerwanego połączenia.
@@ -313,6 +319,8 @@ namespace Zapqio.Runner
             {
                 Methods = l,
                 Name = _settings.Name,
+                ProcessInstanceId = _process.InstanceId,
+                ActiveAttemptIds = _process.Snapshot(_pending),
                 // Pojemność ogłasza runner, bo to on wie, ile zadań uniesie (§5.1) - Web nie ma
                 // własnego limitu, przyjmuje tę liczbę i najwyżej przycina od góry.
                 MaxConcurrency = _settings.MaxConcurrency
