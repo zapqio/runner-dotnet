@@ -455,6 +455,16 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "icacls na $appsettingsPath zakończyło się kodem $LASTEXITCODE." }
     }
 
+    # Konfiguracja modułów (Config\<moduł>.json) - moduły trzymają tam hasła do swoich systemów, więc ACL
+    # jak na appsettings.json z tokenem. Konto usługi dostaje Modify, bo moduł zakłada plik przy pierwszym
+    # starcie; inni użytkownicy maszyny nie czytają. Runner zakłada katalog sam, tu tylko uprawnienia.
+    $configDir = Join-Path $InstallDir 'Config'
+    if (-not (Test-Path $configDir)) { New-Item -ItemType Directory -Path $configDir | Out-Null }
+    $configGrants = @('*S-1-5-18:(OI)(CI)F', '*S-1-5-32-544:(OI)(CI)F')
+    if (-not $LocalSystem) { $configGrants += "NT SERVICE\${ServiceName}:(OI)(CI)M" }
+    & icacls $configDir /inheritance:r /grant:r $configGrants | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "icacls na $configDir zakończyło się kodem $LASTEXITCODE." }
+
     # --- 8. Start i weryfikacja połączenia -----------------------------------
 
     # Katalog logów wg zapisanej konfiguracji — potrzebny do weryfikacji i podsumowania

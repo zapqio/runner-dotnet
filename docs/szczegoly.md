@@ -95,6 +95,14 @@ Paczka powinna przynieść ze sobą plik `##Dll` z listą bibliotek do skanowani
 linię) — bez niego runner ładuje i sprawdza wszystkie DLL-e z paczki, a po pierwszym udanym skanie
 zapisuje w katalogu modułu listę tych, w których coś znalazł, i przy kolejnych startach czyta już tylko je.
 
+#### Konfiguracja modułów
+
+Ustawienia modułu (adresy, bazy, hasła) nie należą do zipa, bo zip jest podmieniany przy każdej
+aktualizacji. Ich miejsce to katalog `Config\` obok `Modules\` (runner zakłada go przy starcie), plik per
+moduł, np. `Config\nexoModule.json`. `install.ps1` nadaje temu katalogowi takie uprawnienia jak
+`appsettings.json`: SYSTEM i Administratorzy pełne, konto usługi zapis (moduł zakłada plik przy pierwszym
+starcie), nikt inny nie czyta. W kodzie modułu ścieżka to `Path.Combine(AppContext.BaseDirectory, "Config")`.
+
 #### Jak zbudować paczkę modułu
 
 Biblioteka klas z jedną paczką NuGet i targetem, który po `dotnet publish -c Release` pakuje katalog

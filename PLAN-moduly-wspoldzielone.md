@@ -356,6 +356,74 @@ jako zapasowy.
    w Harmonogramie widoczne, przebieg co 2 minuty w logu; `-Unregister` usuwa.
 4. Pełna pętla z restartem usługi: na VM z Subiektem, po Twojej stronie.
 
+## Następny temat (16.09, jeszcze nie omawiany): instalacja dla klienta w jednym miejscu
+
+Krok 6 sprawdzony na maszynie z testowym Subiektem (celowo zła wersja 58.0.1, automatyczna podmiana
+i restart zadziałały). Opis instalacji jest dziś rozrzucony po README czterech repo i docs runnera;
+klient potrzebuje jednej ścieżki od zera: runner (`install.ps1`), cztery zipy, skrypt SDK,
+`nexoModule.json`, sprawdzenie w panelu. Do ustalenia, gdzie to ma żyć i w jakiej formie.
+
+## Krok 7: katalog `Config\` na konfigurację modułów (ZROBIONE 16.09, commity lokalne)
+
+Wyniki weryfikacji 16.09 (uprząż, SDK 61.1.0, baza `Nexo_Bizhouse`):
+- Świeży katalog: `Config\nexoModule.json` z pustym `Connect`, domyślnym `SdkUpdate` i kluczami faktur
+  (dopisane przez `Settings` z Invoices); "Who am I" pada natychmiast z listą brakujących pól
+  (`DatabaseServer, DatabaseName, DatabaseUser, UserName`), bez próby łączenia.
+- Plik uzupełniony danymi bazy: operator zwrócony; do skopiowanego pliku bez `SdkUpdate` sekcja dopisała
+  się sama (merge rekurencyjny).
+- Stary `nexoModule.json` obok binarki, bez `Config\`: przeniesiony, połączenie działa.
+- Runner: testy 47 + 90 zielone, `install.ps1` parsuje się; ACL na `Config\` nietestowane tu (wymaga
+  instalacji), na maszynie z testowym Subiektem po Twojej stronie: nowy `install.ps1` z release'u po
+  pushu albo ręcznie `icacls Config /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F "NT SERVICE\ZapqioRunner:(OI)(CI)M"`.
+- Uwaga: w `module-nexo` leży nieśledzony `Nexo.slnx` z IDE (wskazuje usunięty `Nexo.csproj`); przez niego
+  `dotnet publish` bez nazwy projektu nie wie, co budować. Do skasowania.
+- `ZapqioModules.Test.csproj` (paczka 1.0.3, kopia `nexoModule.json` do `Config\`) nadal niezacommitowany
+  razem z Twoimi zmianami w tym repo.
+
+Decyzja z rozmowy: konfiguracja modułów zostaje w plikach obok runnera, ale w osobnym katalogu `Config\`
+z ochroną jak `appsettings.json`. Moduł czyta plik, jeśli jest; jeśli nie ma, tworzy go z pustymi
+danymi, a przy pierwszym połączeniu kończy zadanie czytelnym błędem o braku konfiguracji.
+
+### Runner (`runner-dotnet`, bez zmiany wersji)
+
+- `MethodsProvider` tworzy przy starcie `Config\` obok `Modules\`, tak jak dziś tworzy `Modules\`.
+- `install.ps1`: `Config\` z ACL jak `appsettings.json` z tokenem: SYSTEM i Administratorzy pełne, konto
+  usługi Modify (musi założyć plik), bez dziedziczenia, więc inni użytkownicy maszyny nie czytają haseł.
+- Docs §2: podsekcja "Konfiguracja modułów": `Config\<nazwa>.json`, przeżywa podmianę zipów, ACL.
+  Żadnej zmiany w `Module.Core`: konwencja to `Path.Combine(AppContext.BaseDirectory, "Config")`.
+
+### `module-nexo-connection` (paczka 1.0.3)
+
+- Nowa publiczna klasa `NexoConfig`: ścieżka `Config\nexoModule.json`, `Populate<T>(T instance)` dla klas
+  ustawień. Wczytuje plik, dopisuje do niego brakujące klucze z wartości domyślnych `T` (JsonObject,
+  zapis tylko gdy coś doszło) i wypełnia instancję. Dzięki temu po starcie wszystkich modułów Nexo plik
+  ma komplet kluczy do uzupełnienia, choć każdy moduł zna tylko swoje. Guard rekurencji (deserializacja
+  woła konstruktor) w jednym miejscu zamiast w każdej klasie.
+- Migracja: gdy `Config\nexoModule.json` nie istnieje, a stary `nexoModule.json` obok binarki jest,
+  plik jest przenoszony. Istniejące instalacje działają bez ręcznych kroków.
+- `ConnectionSettings.Connect`: wartości domyślne puste (serwer, baza, użytkownik SQL, hasło, operator),
+  `WindowsLogin=false`. `SdkUpdate` bez zmian.
+- `NexoClient.Connection()`: przed Sferą sprawdzenie `DatabaseServer` i `DatabaseName`; puste = od razu
+  `NexoConnectionException` "Brak konfiguracji połączenia z Nexo: uzupełnij sekcję Connect w
+  `<pełna ścieżka pliku>` i zrestartuj usługę". Metoda pozostaje ogłoszona (błąd przy wywołaniu, jak
+  ustalono), a nie wyłączona przy starcie.
+- README: instalacja z krokiem "uzupełnij `Config\nexoModule.json`".
+
+### `module-nexo` (Invoices)
+
+`Settings` przechodzi na `NexoConfig.Populate(this)` (paczka Connection 1.0.3), usuwa własny odczyt pliku
+i guard. Klucze faktur dopisują się do wspólnego pliku przy pierwszym starcie modułu.
+
+### Weryfikacja
+
+1. Uprząż w świeżym katalogu bez `Config\`: po starcie jest `Config\nexoModule.json` z pustym `Connect`,
+   `SdkUpdate` z domyślnymi i kluczami faktur; "Who am I" kończy się błędem o braku konfiguracji w czasie
+   poniżej sekundy, bez próby łączenia.
+2. Ten sam katalog po wpisaniu danych bazy: "Who am I" zwraca operatora.
+3. Stary układ (plik obok binarki, bez `Config\`): plik przeniesiony, połączenie działa, stary znika.
+4. `install.ps1` z `Config\`: ACL na katalogu (`icacls Config`) bez wpisu dla Users, usługa Modify.
+5. Na maszynie z testowym Subiektem po Twojej stronie: aktualizacja zipów, restart, plik przeniesiony.
+
 ## Do potwierdzenia
 
 - nazwy repo jak wyżej,

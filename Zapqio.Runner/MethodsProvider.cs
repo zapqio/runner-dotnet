@@ -15,24 +15,27 @@ namespace Zapqio.Runner
         private readonly ILogger<MethodsProvider> _logger;
         private readonly DirectoryInfo _dirModules;
         private readonly DirectoryInfo _dirModulesCache;
+        private readonly DirectoryInfo? _dirConfig;
         private readonly List<DirectoryInfo> _sharedDirs = new();
         private readonly List<(Type Type, string Module)> _methodTypes = new();
         private readonly Lazy<IReadOnlyList<IRunnerMethod>> _methods;
         private bool _disposed;
 
         public MethodsProvider(ILogger<MethodsProvider> logger)
-            : this(logger, DirModules, DirModulesCache)
+            : this(logger, DirModules, DirModulesCache, DirConfig)
         {
         }
 
         /// <summary>
         /// Wariant z jawnymi katalogami - dla testów. Host używa domyślnych, obok binarki.
+        /// <paramref name="config"/> to katalog na konfigurację modułów (runner go tylko zakłada).
         /// </summary>
-        public MethodsProvider(ILogger<MethodsProvider> logger, DirectoryInfo modules, DirectoryInfo cache)
+        public MethodsProvider(ILogger<MethodsProvider> logger, DirectoryInfo modules, DirectoryInfo cache, DirectoryInfo? config = null)
         {
             _logger = logger;
             _dirModules = modules;
             _dirModulesCache = cache;
+            _dirConfig = config;
             // Przed pierwszym LoadFrom: skan konsumenta może potrzebować zestawu z paczki współdzielonej
             // już przy GetTypes(), nie dopiero przy wywołaniu metody.
             AppDomain.CurrentDomain.AssemblyResolve += ResolveFromSharedModules;
@@ -100,6 +103,12 @@ namespace Zapqio.Runner
         private static DirectoryInfo DirModules { get; } = new DirectoryInfo(Path.Combine(AppContext.BaseDirectory, "Modules"));
         private static DirectoryInfo DirModulesCache { get; } = new DirectoryInfo(Path.Combine(AppContext.BaseDirectory, ".modulesCache"));
         /// <summary>
+        /// Konfiguracja modułów: każdy trzyma tam własny plik (np. Config\nexoModule.json), który przeżywa
+        /// podmianę zipów. Runner nic z niego nie czyta, tylko zakłada katalog; install.ps1 nadaje mu ACL
+        /// jak appsettings.json, bo moduły trzymają tam hasła.
+        /// </summary>
+        private static DirectoryInfo DirConfig { get; } = new DirectoryInfo(Path.Combine(AppContext.BaseDirectory, "Config"));
+        /// <summary>
         /// Kto czyta katalog modułów - przy usłudze to konto wirtualne <c>NT SERVICE\...</c>, nie
         /// użytkownik, który wgrał paczki. Wpis w logu oszczędza zgadywania, gdy zawodzą uprawnienia.
         /// </summary>
@@ -120,6 +129,10 @@ namespace Zapqio.Runner
                 if (!_dirModulesCache.Exists)
                 {
                     _dirModulesCache.Create();
+                }
+                if (_dirConfig is { Exists: false })
+                {
+                    _dirConfig.Create();
                 }
                 // Kolejność jawna, nie z systemu plików (NTFS zwraca alfabetycznie, ext4 nie): to zarazem
                 // kolejność probowania katalogów paczek współdzielonych.
