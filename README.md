@@ -16,6 +16,7 @@ są w [szczegółach](./docs/szczegoly.md).
   i odsyła wyniki.
 - Sam runner nie umie wykonać niczego — **metody dostarczają moduły** (paczki `.zip` w katalogu
   `Modules`, patrz [Moduły](./docs/szczegoly.md#2-moduły--czym-runner-wykonuje-zadania)).
+  Moduły mogą współdzielić usługi i biblioteki z innymi modułami.
   Runner bez modułów połączy się i zgłosi pustą listę metod.
 - W danej chwili wykonuje **jedno** zadanie. To, co metoda wypisze na konsolę, trafia na żywo do
   logów zadania w panelu Web.

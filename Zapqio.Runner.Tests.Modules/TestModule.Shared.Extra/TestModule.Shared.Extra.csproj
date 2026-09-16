@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Moduł testowy dla MethodsProviderTests: biblioteka leżąca w paczce współdzielonej, której sam
+       moduł współdzielony nigdy nie ładuje (nie ma jej w ##Dll) - odpowiednik zestawu SDK, po który
+       sięga dopiero konsument. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Zapqio.Runner.Module.Core\Zapqio.Runner.Module.Core.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>

@@ -91,9 +91,70 @@ nieabstrakcyjne klasy implementujące jeden z interfejsów z projektu
 - **`IRunnerInjection`** — sam znacznik: klasa trafia do kontenera DI jako singleton i można ją
   wstrzykiwać w pozostałych modułach.
 
-Po pierwszym udanym skanie runner zapisuje w katalogu modułu plik `##Dll` z listą bibliotek,
-w których coś znalazł — przy kolejnych startach ładuje już tylko je, zamiast przeglądać wszystkie
-DLL-e.
+Paczka powinna przynieść ze sobą plik `##Dll` z listą bibliotek do skanowania (jedna nazwa pliku na
+linię) — bez niego runner ładuje i sprawdza wszystkie DLL-e z paczki, a po pierwszym udanym skanie
+zapisuje w katalogu modułu listę tych, w których coś znalazł, i przy kolejnych startach czyta już tylko je.
+
+#### Jak zbudować paczkę modułu
+
+Biblioteka klas z jedną paczką NuGet i targetem, który po `dotnet publish -c Release` pakuje katalog
+publish do zipa (zip ląduje obok katalogu `publish`):
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- net8.0 działa z każdą paczką runnera; net10.0 tylko z paczką .NET 10 -->
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Kontrakt tylko do kompilacji: w runtime dostarcza go runner, kopia DLL w zipie jest zbędna -->
+    <PackageReference Include="Zapqio.Runner.Module.Core" Version="1.0.0" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <Target Name="ZipAfterPublish" AfterTargets="Publish">
+    <PropertyGroup>
+      <ZipFilePath>$(PublishDir)..\$(MSBuildProjectName).zip</ZipFilePath>
+    </PropertyGroup>
+    <!-- Lista bibliotek, które runner ma skanować; kilka bibliotek z metodami = kilka linii -->
+    <WriteLinesToFile File="$(PublishDir)##Dll" Lines="$(TargetFileName)" Overwrite="true" />
+    <Delete Files="$(ZipFilePath)" Condition="Exists('$(ZipFilePath)')" />
+    <ZipDirectory SourceDirectory="$(PublishDir)" DestinationFile="$(ZipFilePath)" />
+  </Target>
+
+</Project>
+```
+
+Zip wrzuć do `Modules\` i zrestartuj usługę. Zależności modułu (paczki NuGet, natywne DLL) jadą
+w zipie razem z nim — runner rozwiązuje je z katalogu paczki.
+
+#### Moduły współdzielone
+
+Moduł może udostępniać innym modułom usługi i biblioteki:
+
+- **Usługi** — klasa `IRunnerInjection` z jednej paczki jest singletonem wstrzykiwanym do metod
+  z każdej innej paczki. To działa zawsze, bez dodatkowych oznaczeń.
+- **Biblioteki** — żeby konsument mógł wiązać się z zestawami leżącymi w innej paczce (z DLL modułu
+  współdzielonego albo z SDK, które ten moduł wozi), paczka dostawcy musi zawierać pusty plik
+  `##Shared`. W targecie z przykładu wyżej dochodzi jedna linia:
+  `<WriteLinesToFile File="$(PublishDir)##Shared" Lines="shared" Overwrite="true" />`.
+
+Paczka może też nie mieć żadnego kodu i tylko udostępniać biblioteki, np. SDK zewnętrznego systemu:
+wtedy oprócz `##Shared` ma **pusty** `##Dll`, żeby runner niczego w niej nie skanował. W logu jest
+wówczas `Moduł współdzielony <paczka> nie dostarczył żadnej metody ani wstrzyknięcia - udostępnia
+tylko biblioteki`, i to jest oczekiwany wpis, nie błąd.
+
+Runner przy starcie najpierw zbiera katalogi wszystkich paczek z `##Shared` (wpis
+`Moduł współdzielony: <paczka>`), a dopiero potem skanuje, więc kolejność paczek nie ma znaczenia.
+Gdy jakiegoś zestawu nie ma w katalogu modułu, który o niego prosi, runner probuje po kolei katalogi
+paczek współdzielonych w kolejności ich nazw; na poziomie `Debug` loguje, skąd zestaw został wzięty.
+
+Konsument kompiluje się przeciw modułowi współdzielonemu, ale **nie pakuje** jego DLL ani jego
+zależności: `ExcludeAssets="runtime"` przy `PackageReference`, `Private="false"` przy
+`ProjectReference` albo `Reference` — tak samo jak przy `Module.Core` wyżej. Jeśli paczki
+współdzielonej nie ma w `Modules\`, metody, których nie da się utworzyć, są pomijane z wpisem `Error`
+`Metoda <typ> z modułu <paczka> nie została utworzona ...` z powodem, a pozostałe metody działają.
 
 Co warto wiedzieć, pisząc moduł:
 
@@ -119,6 +180,10 @@ sc.exe start ZapqioRunner      # uruchomienie
 Restart-Service ZapqioRunner   # restart - po zmianie konfiguracji albo modułów
 ```
 
+Konto usługi (`NT SERVICE\ZapqioRunner`) dostaje od `install.ps1` prawo start/stop na własnej usłudze,
+żeby moduł mógł ją zrestartować po podmianie swoich bibliotek (tak robi moduł Nexo po aktualizacji
+Subiekta). Przy `-LocalSystem` nie jest to potrzebne.
+
 ### 4. Logi i diagnostyka
 
 - **Logi plikowe** — katalog wskazany w `Logger:PathDirectory` (domyślnie `Logs` obok binarki), pliki
@@ -137,6 +202,8 @@ Czy runner poprawnie połączył się z Web — szukaj w logu:
 | --- | --- |
 | `Successfully connected to WebSocket at wss://…/ws-runner` | Uzgodnienie się powiodło (HTTP 101). |
 | `Add method: <typ> in module: <moduł>` | Metoda z modułu została zarejestrowana i pójdzie do Web w wiadomości `Info`. |
+| `Moduł współdzielony: <paczka> - jego katalog służy do rozwiązywania zestawów innych modułów` | Paczka z plikiem `##Shared`; inne moduły mogą brać z niej biblioteki (patrz §2). |
+| `Metoda <typ> z modułu <paczka> nie została utworzona i nie będzie ogłoszona: <powód>` | Konstruktor metody rzucił albo brakuje wstrzyknięcia — najczęściej nie ma paczki modułu współdzielonego. Metoda jest wyłączona do restartu, pozostałe idą do Web normalnie. |
 | `Kolejna próba połączenia za <n>s (nieudanych z rzędu: <k>)` | Web nieosiągalny albo uzgodnienie odrzucone; runner ponawia sam. |
 | `Serwer ogranicza tempo uzgodnień (429)` | Limit po stronie Web — patrz niżej. |
 | `Serwer odrzucił uzgadnianie ze statusem <kod>` | Odmowa protokołu; kod rozstrzyga przyczynę. |
@@ -181,7 +248,7 @@ Wersję zainstalowanej binarki sprawdzisz przez:
 | `404` albo strona HTML zamiast `101` | Żądanie nie trafiło w punkt końcowy tej instancji. Sprawdź segment instancji w `Url` i to, że `Url` **nie** kończy się na `/ws-runner`. |
 | W logu `426 Upgrade Required` | Web mówi inną główną wersją protokołu niż runner. Zaktualizuj runnera do wersji zgodnej z instancją (odpowiedź niesie wersję serwera w nagłówku `X-Zapqio-Protocol-Version`). |
 | `429` / `Serwer ogranicza tempo uzgodnień` | Limit uzgodnień po stronie Web; odmowa zapada przed sprawdzeniem tokenu, więc nie mówi o nim nic. Runner odczekuje sam: honoruje `Retry-After` (do 300 s), a bez tego nagłówka wycofuje się narastająco od 3 s do 60 s z losowym rozrzutem. Jeśli wraca uporczywie, sprawdź, czy spod tego samego adresu nie łączy się naraz wiele runnerów. |
-| Runner widoczny w panelu, ale bez metod | Przy starcie runner loguje `Katalog modułów: <ścieżka> (konto: <użytkownik>)`, listę znalezionych paczek, każdy `Add method:` i na koniec `Wysyłam Info: N metod: ...` (albo ostrzeżenie, że metod nie ma). Jeśli paczek nie widać albo jest `Brak dostępu do katalogu modułów`, to konto usługi `NT SERVICE\ZapqioRunner` nie ma prawa odczytu — zdarza się, gdy katalog `Modules\` został **przeniesiony** (nie skopiowany) z profilu użytkownika, bo zachowuje wtedy stare uprawnienia. Sprawdź `icacls C:\zapqio\runner\Modules /T`, napraw przez `icacls C:\zapqio\runner\Modules /reset /T` (przywraca dziedziczenie z katalogu instalacji) albo uruchom ponownie `install.ps1`. Jeśli paczki są, ale DLL się nie ładują, w logu jest `Nie udało się załadować <dll>` z powodem — np. blokada polityki kontroli aplikacji (WDAC / Smart App Control) albo moduł zbudowany pod inną wersję .NET. Poziom `Debug` dokłada `Unppack module:` i `Check dll:`. |
+| Runner widoczny w panelu, ale bez metod | Przy starcie runner loguje `Katalog modułów: <ścieżka> (konto: <użytkownik>)`, listę znalezionych paczek, każdy `Add method:` i na koniec `Wysyłam Info: N metod: ...` (albo ostrzeżenie, że metod nie ma). Jeśli paczek nie widać albo jest `Brak dostępu do katalogu modułów`, to konto usługi `NT SERVICE\ZapqioRunner` nie ma prawa odczytu — zdarza się, gdy katalog `Modules\` został **przeniesiony** (nie skopiowany) z profilu użytkownika, bo zachowuje wtedy stare uprawnienia. Sprawdź `icacls C:\zapqio\runner\Modules /T`, napraw przez `icacls C:\zapqio\runner\Modules /reset /T` (przywraca dziedziczenie z katalogu instalacji) albo uruchom ponownie `install.ps1`. Jeśli paczki są, ale DLL się nie ładują, w logu jest `Nie udało się załadować <dll>` z powodem — np. blokada polityki kontroli aplikacji (WDAC / Smart App Control) albo moduł zbudowany pod inną wersję .NET. Jeśli `Add method:` jest, ale metody nie ma w `Wysyłam Info`, szukaj wpisu `Metoda ... nie została utworzona` z powodem — zwykle brak paczki modułu współdzielonego, z którego metoda bierze wstrzyknięcie. Poziom `Debug` dokłada `Unppack module:` i `Check dll:`. |
 | W logu zadania `Not found method: <nazwa>` | Web kieruje zadanie po nazwie z `NameMethod()`. Moduł nie został załadowany (restart po dorzuceniu paczki) albo nazwa metody rozjechała się z tą użytą w pipeline. |
 | `Failed to send JobReturn ... the result of this job was lost` | Połączenie padło między odebraniem zadania a odesłaniem wyniku; Web zamknie takie zadanie jako osierocone. Przy dużych wynikach sprawdź limit 32 MiB na wiadomość — jego przekroczenie zamyka połączenie kodem WS `1009`. |
 | Konfiguracja ignorowana przy ręcznym uruchomieniu | `appsettings.json` jest czytany z katalogu roboczego — uruchamiaj binarkę po `cd C:\zapqio\runner`. Trybu usługi to nie dotyczy. |

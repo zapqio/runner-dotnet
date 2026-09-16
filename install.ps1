@@ -427,6 +427,24 @@ try {
         Write-Host '==> Nadaję kontu usługi prawo zapisu do katalogu instalacji...'
         & icacls $InstallDir /grant "NT SERVICE\${ServiceName}:(OI)(CI)M" | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "icacls na $InstallDir zakończyło się kodem $LASTEXITCODE." }
+
+        # Moduł może zrestartować usługę po podmianie swoich bibliotek (tak robi moduł Nexo po aktualizacji
+        # Subiekta): konto usługi dostaje prawo start/stop na własnej usłudze. Bez tego prawa skrypt modułu
+        # kończy proces runnera i usługa wstaje z opcji odzyskiwania, więc błąd tutaj nie przerywa instalacji.
+        Write-Host '==> Nadaję kontu usługi prawo restartu własnej usługi...'
+        try {
+            $serviceSid = (New-Object System.Security.Principal.NTAccount("NT SERVICE\$ServiceName")).Translate([System.Security.Principal.SecurityIdentifier]).Value
+            $sddl = (& sc.exe sdshow $ServiceName | Where-Object { $_ -match '^D:' }) -join ''
+            if (-not $sddl) { throw 'sc.exe sdshow nie zwróciło deskryptora zabezpieczeń' }
+            if ($sddl -notlike "*$serviceSid*") {
+                $ace = "(A;;CCLCSWRPWPDTLOCRRC;;;$serviceSid)"
+                $newSddl = if ($sddl -match '^(D:.*?)(S:.*)$') { $Matches[1] + $ace + $Matches[2] } else { $sddl + $ace }
+                Invoke-Sc @('sdset', $ServiceName, $newSddl)
+            }
+        }
+        catch {
+            Write-Warning "Nie udało się nadać kontu usługi prawa restartu ($($_.Exception.Message)). Moduły podmieniające biblioteki użyją opcji odzyskiwania usługi."
+        }
     }
 
     if ($overrides['Token'] -or $fileToken) {

@@ -24,4 +24,17 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
+  <!-- Moduły testowe dla MethodsProviderTests: budowane razem z testami, ale NIE referencjonowane -
+       runner ma je załadować z zipów własnym mechanizmem, więc ich DLL nie mogą leżeć obok binarki
+       testów (host rozwiązałby je sam). Lądują w TestModules\ pod katalogiem wyjściowym. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Zapqio.Runner.Tests.Modules\TestModule.Shared\TestModule.Shared.csproj" ReferenceOutputAssembly="false" OutputItemType="TestModuleDll" />
+    <ProjectReference Include="..\Zapqio.Runner.Tests.Modules\TestModule.Shared.Extra\TestModule.Shared.Extra.csproj" ReferenceOutputAssembly="false" OutputItemType="TestModuleDll" />
+    <ProjectReference Include="..\Zapqio.Runner.Tests.Modules\TestModule.Consumer\TestModule.Consumer.csproj" ReferenceOutputAssembly="false" OutputItemType="TestModuleDll" />
+  </ItemGroup>
+
+  <Target Name="CopyTestModules" AfterTargets="Build">
+    <Copy SourceFiles="@(TestModuleDll)" DestinationFolder="$(OutDir)TestModules" SkipUnchangedFiles="true" />
+  </Target>
+
 </Project>

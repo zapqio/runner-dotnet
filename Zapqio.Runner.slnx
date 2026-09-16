@@ -15,4 +15,9 @@
   <Project Path="Zapqio.Runner.Module.Core/Zapqio.Runner.Module.Core.csproj" />
   <Project Path="Zapqio.Runner/Zapqio.Runner.csproj" />
   <Project Path="Zapqio.Runner.Tests/Zapqio.Runner.Tests.csproj" />
+  <Folder Name="/Zapqio.Runner.Tests.Modules/">
+    <Project Path="Zapqio.Runner.Tests.Modules/TestModule.Shared/TestModule.Shared.csproj" />
+    <Project Path="Zapqio.Runner.Tests.Modules/TestModule.Shared.Extra/TestModule.Shared.Extra.csproj" />
+    <Project Path="Zapqio.Runner.Tests.Modules/TestModule.Consumer/TestModule.Consumer.csproj" />
+  </Folder>
 </Solution>

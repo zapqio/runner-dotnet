@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Moduł testowy dla MethodsProviderTests: konsument paczki współdzielonej.
+       Private=false: DLL modułu współdzielonego nie trafia do jego katalogu, tak jak w prawdziwym
+       konsumencie (ExcludeAssets=runtime przy paczce NuGet). PrivateAssets=all: żeby te referencje nie
+       przeciekły tranzytywnie do katalogu binarki testów - host rozwiązałby je sam, z pominięciem
+       mechanizmu, który testy mają sprawdzić. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Zapqio.Runner.Module.Core\Zapqio.Runner.Module.Core.csproj" Private="false" />
+    <ProjectReference Include="..\TestModule.Shared\TestModule.Shared.csproj" Private="false" PrivateAssets="all" />
+    <ProjectReference Include="..\TestModule.Shared.Extra\TestModule.Shared.Extra.csproj" Private="false" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

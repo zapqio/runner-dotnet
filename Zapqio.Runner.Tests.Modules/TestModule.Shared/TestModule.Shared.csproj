@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Moduł testowy dla MethodsProviderTests: paczka współdzielona z jednym wstrzyknięciem.
+       Bez Nullable, jak prawdziwe moduły. Kontrakt tylko do kompilacji (Private=false) -
+       w runtime dostarcza go host testów, tak jak runner w produkcji. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Zapqio.Runner.Module.Core\Zapqio.Runner.Module.Core.csproj" Private="false" />
+  </ItemGroup>
+
+</Project>
