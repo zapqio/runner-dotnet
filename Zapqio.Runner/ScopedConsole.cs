@@ -1,155 +1,124 @@
-﻿using System.Text;
+using System.Text;
 using Zapqio.Runner.Protocol;
+using Zapqio.Runner.Protocol.Enums;
 
 namespace Zapqio.Runner
 {
+    /// <summary>
+    /// Kanał logu dla modułów, które niczego nie wołają: <c>Console.WriteLine</c> metody idzie do
+    /// platformy jako <see cref="MessageLogLevel.Info"/>, a <c>Console.Error</c> jako
+    /// <see cref="MessageLogLevel.Error"/>. Moduł, który chce nazwać wagę wpisu wprost - także
+    /// <c>Debug</c>, <c>Warning</c> i <c>Critical</c> - sięga po <see cref="Core.RunnerLog"/> albo
+    /// wstrzykuje <c>ILogger</c>; jedno i drugie kończy w tym samym <see cref="JobLogWriter"/>.
+    /// </summary>
+    /// <remarks>
+    /// Podmiana <c>Console.Out</c> jest globalna i jednorazowa, ale przekierowanie działa zakresowo:
+    /// pisarz kieruje tekst do kolejki tylko wtedy, gdy w bieżącym przepływie trwa zadanie. Poza
+    /// zadaniem - start runnera, jego własne logi - tekst leci na prawdziwą konsolę. Dlatego
+    /// <c>Program</c> zapamiętuje oryginalne <c>Console.Out</c>, zanim powstanie ta klasa, i to do
+    /// niego pisze Serilog: inaczej własne logi runnera wpadłyby do kolejki zadań.
+    /// </remarks>
     public class ScopedConsole
     {
         private readonly ScopedTextWriter _out;
         private readonly ScopedTextWriter _error;
-        private readonly Outbox _outbox;
-        private readonly ILoggerFactory _loggerFactory;
 
-        public ScopedConsole(Outbox outbox, ILoggerFactory loggerFactory)
+        public ScopedConsole(JobLogWriter writer)
         {
-            _outbox = outbox;
-            _loggerFactory = loggerFactory;
-            _out = new ScopedTextWriter(Console.Out, Send);
-            _error = new ScopedTextWriter(Console.Error, SendErr);
+            if (writer is null) throw new ArgumentNullException(nameof(writer));
+
+            _out = new ScopedTextWriter(Console.Out, (job, text) =>
+                writer.Write(job.Id, job.AttemptId, job.Name, MessageLogLevel.Info, text));
+            _error = new ScopedTextWriter(Console.Error, (job, text) =>
+                writer.Write(job.Id, job.AttemptId, job.Name, MessageLogLevel.Error, text));
+
             Console.SetOut(_out);
             Console.SetError(_error);
         }
-        private void SendErr(MessageJob? message, string text, ILogger logger)
-        {
-            if (message == null)
-            {
-                return;
-            }
-            _outbox.EnqueueLog(new MessageLog
-            {
-                Date = DateTimeOffset.Now,
-                JobId = message.Id,
-                AttemptId = message.AttemptId,
-                Level = Zapqio.Runner.Protocol.Enums.MessageLogLevel.Error,
-                Message = text,
-            });
-            logger?.LogError(text);
-        }
-        private void Send(MessageJob? message, string text, ILogger logger)
-        {
-            if (message == null)
-            {
-                return;
-            }
-            _outbox.EnqueueLog(new MessageLog
-            {
-                Date = DateTimeOffset.Now,
-                JobId = message.Id,
-                AttemptId = message.AttemptId,
-                Level = Zapqio.Runner.Protocol.Enums.MessageLogLevel.Info,
-                Message = text,
-            });
-            logger?.LogInformation(text);
-        }
+
         public TextWriter Out => _out;
         public TextWriter Error => _error;
 
+        /// <summary>
+        /// Włącza przekierowanie konsoli na czas wykonania metody. Zakres żyje w
+        /// <see cref="AsyncLocal{T}"/>, więc obejmuje też zadania i wątki, które metoda uruchomi.
+        /// </summary>
         public ConsoleScope BeginScope(MessageJob message)
         {
-            var outWriter = new StringWriter();
-            var errorWriter = new StringWriter();
-            var outState = new ScopeState(outWriter, message, _loggerFactory.CreateLogger($"Method({message.Name})-{message.Id}"));
-            var errorState = new ScopeState(errorWriter, message, _loggerFactory.CreateLogger($"Method({message.Name})-{message.Id}"));
+            if (message is null) throw new ArgumentNullException(nameof(message));
 
-            _out.SetScope(outState);
-            _error.SetScope(errorState);
-
-            var scope = new ConsoleScope(outWriter, errorWriter, _out, _error);
-            return scope;
+            _out.SetScope(message);
+            _error.SetScope(message);
+            return new ConsoleScope(_out, _error);
         }
 
-        public class ConsoleScope : IDisposable
+        public sealed class ConsoleScope : IDisposable
         {
-            private readonly StringWriter _outWriter;
-            private readonly StringWriter _errorWriter;
             private readonly ScopedTextWriter _out;
             private readonly ScopedTextWriter _error;
+            private bool _disposed;
 
-            internal ConsoleScope(StringWriter outWriter, StringWriter errorWriter, ScopedTextWriter outScoped, ScopedTextWriter errorScoped)
+            internal ConsoleScope(ScopedTextWriter outScoped, ScopedTextWriter errorScoped)
             {
-                _outWriter = outWriter;
-                _errorWriter = errorWriter;
                 _out = outScoped;
                 _error = errorScoped;
             }
 
             public void Dispose()
             {
+                if (_disposed) return;
+                _disposed = true;
                 _out.SetScope(null);
                 _error.SetScope(null);
-                _outWriter.Dispose();
-                _errorWriter.Dispose();
             }
         }
-        internal class ScopeState
-        {
-            public readonly ILogger Log;
-            public StringWriter Writer { get; }
-            public MessageJob Message { get; }
 
-            public ScopeState(StringWriter writer, MessageJob message, ILogger log)
-            {
-                Writer = writer;
-                Message = message;
-                Log = log;
-            }
-        }
         internal class ScopedTextWriter : TextWriter
         {
             private readonly TextWriter _default;
-            private readonly AsyncLocal<ScopeState?> _local = new();
-            private readonly Action<MessageJob?, string, ILogger>? _onWrite;
+            private readonly AsyncLocal<MessageJob?> _local = new();
+            private readonly Action<MessageJob, string> _onWrite;
 
-            public ScopedTextWriter(TextWriter defaultWriter, Action<MessageJob?, string, ILogger>? onWrite = null)
+            public ScopedTextWriter(TextWriter defaultWriter, Action<MessageJob, string> onWrite)
             {
                 _default = defaultWriter;
                 _onWrite = onWrite;
             }
 
-            internal void SetScope(ScopeState? state) => _local.Value = state;
+            internal void SetScope(MessageJob? job) => _local.Value = job;
 
-            private MessageJob? CurrentJob => _local.Value?.Message;
+            private MessageJob? CurrentJob => _local.Value;
 
             public override Encoding Encoding => CurrentJob != null ? Encoding.UTF8 : _default.Encoding;
 
             public override void Write(char value)
             {
-                if (CurrentJob != null)
-                    _onWrite?.Invoke(CurrentJob, value.ToString(), _local.Value?.Log);
+                if (CurrentJob is { } job)
+                    _onWrite(job, value.ToString());
                 else
                     _default.Write(value);
             }
 
             public override void Write(string? value)
             {
-                if (CurrentJob != null)
-                    _onWrite?.Invoke(CurrentJob, value ?? "", _local.Value?.Log);
+                if (CurrentJob is { } job)
+                    _onWrite(job, value ?? "");
                 else
                     _default.Write(value);
             }
 
             public override void WriteLine(string? value)
             {
-                if (CurrentJob != null)
-                    _onWrite?.Invoke(CurrentJob, value ?? "", _local.Value?.Log);
+                if (CurrentJob is { } job)
+                    _onWrite(job, value ?? "");
                 else
                     _default.WriteLine(value);
             }
 
             public override void WriteLine()
             {
-                if (CurrentJob != null)
-                    _onWrite?.Invoke(CurrentJob, "", _local.Value?.Log);
+                if (CurrentJob is { } job)
+                    _onWrite(job, "");
                 else
                     _default.WriteLine();
             }

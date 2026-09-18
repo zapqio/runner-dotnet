@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Zapqio.Runner.Tests;
 
@@ -19,6 +20,18 @@ public class MethodsProviderTests
     private const string Shared = "TestModule.Shared.dll";
     private const string SharedExtra = "TestModule.Shared.Extra.dll";
 
+    /// <summary>
+    /// Ujście logów modułów, którego te testy nie oglądają: loader potrzebuje go tylko po to, żeby
+    /// zarejestrować <c>ILogger</c> w kontenerze modułów. Kolejka wyjściowa jest odłączona od gniazda,
+    /// więc cokolwiek moduł testowy napisze, zostaje w niej i nigdzie nie idzie.
+    /// </summary>
+    private static JobLogWriter DetachedLogWriter()
+    {
+        var settings = new AppSettings();
+        settings.Normalize();
+        return new JobLogWriter(new Outbox(100), settings, NullLoggerFactory.Instance);
+    }
+
     [Fact]
     public async Task SharedModule_ResolvesAssembliesForConsumer_RegardlessOfZipOrder()
     {
@@ -28,7 +41,7 @@ public class MethodsProviderTests
         sandbox.Zip("Z-Shared", new[] { Shared, SharedExtra }, scan: new[] { Shared }, shared: true);
         var log = new CollectingLogger();
 
-        using var provider = new MethodsProvider(log, sandbox.Modules, sandbox.Cache);
+        using var provider = new MethodsProvider(log, DetachedLogWriter(), sandbox.Modules, sandbox.Cache);
 
         Assert.Equal(new[] { "Z-Shared" }, provider.SharedDirectories.Select(d => d.Name));
         Assert.True(log.Has(LogLevel.Information, "Moduł współdzielony: Z-Shared"), log.Dump());
@@ -48,7 +61,7 @@ public class MethodsProviderTests
         sandbox.Zip("A-Consumer", new[] { Consumer }, scan: new[] { Consumer }, shared: false);
         var log = new CollectingLogger();
 
-        using var provider = new MethodsProvider(log, sandbox.Modules, sandbox.Cache);
+        using var provider = new MethodsProvider(log, DetachedLogWriter(), sandbox.Modules, sandbox.Cache);
         var names = provider.GetMethods().Select(m => m.NameMethod()).ToList();
 
         Assert.Empty(provider.SharedDirectories);
@@ -67,7 +80,7 @@ public class MethodsProviderTests
         sandbox.Zip("Shared", new[] { Shared, SharedExtra }, scan: new[] { Shared }, shared: true);
         var log = new CollectingLogger();
 
-        using var provider = new MethodsProvider(log, sandbox.Modules, sandbox.Cache);
+        using var provider = new MethodsProvider(log, DetachedLogWriter(), sandbox.Modules, sandbox.Cache);
         var names = provider.GetMethods().Select(m => m.NameMethod()).OrderBy(n => n).ToList();
 
         Assert.Equal(new[] { "derived", "uses-client" }, names);

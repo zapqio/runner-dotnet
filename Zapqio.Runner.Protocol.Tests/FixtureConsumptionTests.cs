@@ -34,6 +34,8 @@ public class FixtureConsumptionTests
     [InlineData("job-accepted.json", MessageType.JobAccepted)]
     [InlineData("log-info.json", MessageType.Log)]
     [InlineData("log-error.json", MessageType.Log)]
+    [InlineData("log-debug.json", MessageType.Log)]
+    [InlineData("log-warning.json", MessageType.Log)]
     [InlineData("job-return-ok.json", MessageType.JobReturn)]
     [InlineData("job-return-error.json", MessageType.JobReturn)]
     public void Envelope_of_every_fixture_is_readable(string fixture, MessageType expectedType)
@@ -111,6 +113,9 @@ public class FixtureConsumptionTests
     [Theory]
     [InlineData("log-info.json", MessageLogLevel.Info, "Run Job: 2026-06-12T14:30:00", "2026-06-12T14:30:00.123+00:00")]
     [InlineData("log-error.json", MessageLogLevel.Error, "Main exception: boom", "2026-06-12T14:30:01.456+00:00")]
+    // Poziomy dodane w v3 protokolu (§9).
+    [InlineData("log-debug.json", MessageLogLevel.Debug, "Cache hit: resize-image/800x600", "2026-06-12T14:30:00.456+00:00")]
+    [InlineData("log-warning.json", MessageLogLevel.Warning, "Upstream answered in 4s, over the 2s budget", "2026-06-12T14:30:00.789+00:00")]
     public void Log_decodes_level_message_and_timestamp(
         string fixture, MessageLogLevel level, string message, string date)
     {

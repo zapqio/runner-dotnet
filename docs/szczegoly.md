@@ -19,6 +19,7 @@ Konfiguracja w pliku `appsettings.json` obok binarki lub przez zmienne środowis
 | `MaxConcurrency` | `ZAPQIO_MAX_CONCURRENCY` | Ile zadań runner wykonuje naraz (domyślnie `1`, czyli jedno po drugim). Wyższa wartość ma sens wyłącznie dla modułów gotowych na równoległe wywołania `Run`, także tej samej metody na tej samej instancji — runner nie dodaje żadnej synchronizacji, o tym decyduje twórca modułu. To jedyne miejsce, w którym pojemność się ustawia: runner ogłasza ją platformie przy połączeniu, a panel **Runnery** pokazuje ją tylko do odczytu. Platforma przycina wartości powyżej 32. |
 | `StopTimeoutSeconds` | `StopTimeoutSeconds` | Ile sekund przy zatrzymaniu usługi runner czeka na zadania w toku i wysyłkę ich wyników, zanim zamknie połączenie (domyślnie `30`). Po tym czasie zadania są porzucane, a platforma zamyka je jako „wynik nieznany". Menedżer usług Windows ma własny limit na zatrzymanie usługi, zwykle krótszy — dłuższe zadania mogą go przekroczyć. |
 | `MaxQueuedLogLines` | `MaxQueuedLogLines` | Ile linii logu zadań może czekać na wysyłkę, gdy platforma jest niedostępna (domyślnie `10000`). Ponad limit kolejne linie są pomijane, a w logu zadania pojawia się jedna linia ostrzegawcza. |
+| `MinRemoteLogLevel` | `ZAPQIO_MIN_LOG_LEVEL` | Od jakiej wagi wpisy **modułu** idą do panelu Web: `Debug`, `Info` (domyślnie), `Warning`, `Error`, `Critical`. Obejmuje wszystkie trzy kanały modułu, więc próg `Warning` ucisza też zwykłe `Console.WriteLine`. Nie obejmuje wpisów, które runner generuje sam (wiersz startowy zadania, wyjątek, ostrzeżenie o pełnej kolejce) — te wychodzą zawsze. Wartość spoza listy jest ignorowana i zostaje `Info`. Czytane raz, przy starcie — włączenie `Debug` wymaga restartu usługi. |
 
 **Adres instancji.** Nazwa instancji jest częścią adresu, a nie hosta — instancje stoją pod wspólnym
 hostem i rozróżnia je segment ścieżki wybrany przy zakładaniu instancji:
@@ -167,7 +168,26 @@ współdzielonej nie ma w `Modules\`, metody, których nie da się utworzyć, s�
 Co warto wiedzieć, pisząc moduł:
 
 - `Console.WriteLine` i `Console.Error.WriteLine` z wnętrza `Run` trafiają na żywo do logów zadania
-  w panelu Web (strumień błędów jako poziom `Error`).
+  w panelu Web (strumień błędów jako poziom `Error`). Nic nie trzeba w module zmieniać, żeby to
+  działało — i tak zostaje dla modułów zbudowanych pod starsze wersje `Module.Core`.
+- **Wagę wpisu można nazwać wprost** (od `Module.Core` 1.2): `RunnerLog.Debug/Info/Warning/Error/Critical`.
+  Klasa jest statyczna, więc działa też w metodach pomocniczych i wątkach, które metoda uruchomi —
+  wpis sam trafia do właściwego zadania. Przed kosztownym budowaniem treści warto zapytać
+  `RunnerLog.IsEnabled(RunnerLogLevel.Debug)`, bo poziom `Debug` domyślnie **nie** idzie do Web
+  (patrz `MinRemoteLogLevel` w [Konfiguracji](#1-konfiguracja)).
+
+  ```csharp
+  public async Task<string> Run(string data)
+  {
+      RunnerLog.Debug($"wejście: {data}");
+      if (budget.Exceeded) RunnerLog.Warning($"źródło odpowiedziało po {elapsed:0.0}s");
+      return output;
+  }
+  ```
+
+- Kto woli wstrzykiwanie, może wziąć w konstruktorze `ILogger<T>` — runner rejestruje go w kontenerze
+  modułów i kieruje w to samo miejsce, z tym samym progiem. `Trace` schodzi do `Debug`, bo protokół
+  nie ma osobnego poziomu poniżej `Debug`.
 - Wyjątek z `Run` kończy zadanie statusem `ERROR`, a jego treść ląduje w logach zadania.
 - `JobContext.Current` (od `Module.Core` 1.1) daje w `Run` identyfikator operacji (`JobId`, ten sam
   przy każdej wysyłce i każdym ponowieniu tego zadania), identyfikator próby (`AttemptId`) i nazwę
@@ -201,8 +221,11 @@ Subiekta). Przy `-LocalSystem` nie jest to potrzebne.
   lokalnym śladem, więc nie zostawiaj `Logger:PathDirectory` pustego. W Podglądzie zdarzeń
   (dziennik `System`, źródło *Service Control Manager*) znajdziesz wyłącznie zdarzenia startu
   i zatrzymania samej usługi.
-- **Logi zadań** — to, co metoda wypisze na konsolę, idzie do panelu Web, a równolegle do logu
-  plikowego pod źródłem `Method(<nazwa-metody>)-<id-zadania>`.
+- **Logi zadań** — wszystko, co metoda zaloguje (konsola, `RunnerLog`, wstrzyknięty `ILogger`), idzie
+  do panelu Web, a równolegle do logu plikowego pod źródłem `Method(<nazwa-metody>)`, z
+  identyfikatorem zadania w nawiasie kwadratowym na początku wiersza. Wpisy poniżej
+  `MinRemoteLogLevel` nie opuszczają runnera, ale w logu plikowym są — o ile przepuści je
+  `Logger:LogLevel`.
 
 Czy runner poprawnie połączył się z Web — szukaj w logu:
 

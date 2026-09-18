@@ -1,6 +1,7 @@
 using Serilog;
 using Serilog.Events;
 using Zapqio.Runner.Background;
+using Zapqio.Runner.Core;
 
 namespace Zapqio.Runner
 {
@@ -19,6 +20,7 @@ namespace Zapqio.Runner
                 var envId = builder.Configuration.GetValue<string>("ZAPQIO_NAME");
                 var envUrl = builder.Configuration.GetValue<string>("ZAPQIO_URL");
                 var envMaxConcurrency = builder.Configuration.GetValue<string>("ZAPQIO_MAX_CONCURRENCY");
+                var envMinLogLevel = builder.Configuration.GetValue<string>("ZAPQIO_MIN_LOG_LEVEL");
                 if (!string.IsNullOrEmpty(envKey))
                 {
                     s.Token = envKey;
@@ -48,6 +50,10 @@ namespace Zapqio.Runner
                 {
                     s.MaxConcurrency = maxConcurrency;
                 }
+                if (!string.IsNullOrEmpty(envMinLogLevel))
+                {
+                    s.MinRemoteLogLevel = envMinLogLevel;
+                }
                 s.Normalize();
                 return s;
             });
@@ -55,6 +61,10 @@ namespace Zapqio.Runner
 
             // Kolejka wyjściowa i jej jedyny autor. Wszystko, co idzie do platformy, przechodzi tędy.
             builder.Services.AddSingleton(sp => new Outbox(sp.GetRequiredService<AppSettings>().MaxQueuedLogLines));
+
+            // Wszystkie trzy kanały modułu (stdout/stderr, RunnerLog, wstrzyknięty ILogger) schodzą się
+            // w JobLogWriter - to on zna próg wysyłki i przypisanie wpisu do zadania.
+            builder.Services.AddSingleton<JobLogWriter>();
             builder.Services.AddSingleton<ScopedConsole>();
             builder.Services.AddSingleton<MethodsProvider>();
             builder.Services.AddSingleton<WSClient>();
@@ -113,6 +123,17 @@ namespace Zapqio.Runner
                     log.WriteTo.File(Path.Combine(fullPath, ".log"), outputTemplate: template, rollOnFileSizeLimit: true, fileSizeLimitBytes: 200 * 1048576, rollingInterval: RollingInterval.Day);
                 }
                 Log.Logger = log.CreateLogger();
+
+                // Statyczny RunnerLog modułów musi mieć gdzie oddawać wpisy, zanim powstanie pierwszy
+                // moduł - moduł potrafi logować już z konstruktora, a MethodsProvider buduje je
+                // wszystkie przy pierwszym sięgnięciu po metody. Odbiornik żyje tak długo jak proces,
+                // więc zwrócony uchwyt (służący tylko testom do przywrócenia poprzedniego) przepada.
+                RunnerLog.UseSink(new ModuleLogSink(host.Services.GetRequiredService<JobLogWriter>()));
+
+                var settingsLogLevel = settings.RemoteLogThreshold;
+                Log.Logger.Information(
+                    "Log zadań: do platformy idą wpisy modułu od poziomu {Threshold} (ZAPQIO_MIN_LOG_LEVEL), kolejka {MaxQueued} linii",
+                    settingsLogLevel, settings.MaxQueuedLogLines);
             }
         }
     }

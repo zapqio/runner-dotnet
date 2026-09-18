@@ -5,7 +5,7 @@
 /// request header carrying its protocol <b>major</b> version; the server accepts the connection only
 /// if it supports that version. A missing header is treated as version <c>1</c> (the pre-versioning
 /// baseline), so runners built before versioning was introduced keep working. The major version is
-/// bumped only on a breaking change â€” see <c>protocol/PROTOCOL.md</c> Â§9.
+/// bumped only on a breaking change - see <c>protocol/PROTOCOL.md</c> section 9.
 /// </summary>
 public static class ProtocolVersion
 {
@@ -18,6 +18,11 @@ public static class ProtocolVersion
     /// v2 added the required <c>attemptId</c> on Job/Log/JobReturn, the <c>JobAccepted</c> message
     /// with its acceptance deadline, and the one-outstanding-job-per-runner rule. A v1 runner cannot
     /// talk to a v2 server: the fields are required in both directions.
+    ///
+    /// v3 widened <c>level</c> on Log from Info/Error to Debug/Info/Warning/Error/Critical (§5.4).
+    /// The break is one-way - a v3 server would understand everything a v2 runner sends - but the
+    /// server speaks exactly one version (§9), so a v2 runner is refused with 426 by a v3 server all
+    /// the same, and this build is refused by a v2 server. Upgrade the server and the runners together.
     /// </summary>
-    public const int Current = 2;
+    public const int Current = 3;
 }

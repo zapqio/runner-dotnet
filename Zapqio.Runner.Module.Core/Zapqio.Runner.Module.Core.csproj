@@ -7,8 +7,8 @@
 
     <!-- NuGet Package Settings -->
     <PackageId>Zapqio.Runner.Module.Core</PackageId>
-    <Version>1.1.0</Version>
-    <PackageReleaseNotes>1.1.0: JobContext.Current - kontekst zadania (id operacji, id próby, nazwa metody) dostępny w IRunnerMethod.Run bez zmiany interfejsu. AssemblyVersion bez zmian, moduły 1.0 działają bez przebudowy.</PackageReleaseNotes>
+    <Version>1.2.0</Version>
+    <PackageReleaseNotes>1.2.0: RunnerLog - log zadania z jawnie nazwaną wagą wpisu (Debug, Info, Warning, Error, Critical) zamiast wyłącznie Console.WriteLine/Console.Error. Runner udostępnia też ILogger&lt;T&gt; w kontenerze modułów. AssemblyVersion bez zmian, moduły 1.0 i 1.1 działają bez przebudowy; ich Console.WriteLine dalej idzie na Info, a Console.Error na Error.&#xD;&#xA;1.1.0: JobContext.Current - kontekst zadania (id operacji, id próby, nazwa metody) dostępny w IRunnerMethod.Run bez zmiany interfejsu.</PackageReleaseNotes>
     <!-- Tozsamosc kontraktu musi byc stabilna i zgodna z wersja paczki NuGet, przeciw ktorej
          kompiluja sie moduly. Bez tego -p:Version=<wersja release'u> z release.yml nadpisuje
          AssemblyVersion (np. na 0.1.4.0) i moduly przestaja sie wiazac: "The located assembly's
@@ -17,7 +17,7 @@
     <Authors>Zapqio</Authors>
     <Company>Hdwr global</Company>
     <Product>Zapqio Runner Module Lib</Product>
-    <Description>Core interfaces for creating Zapqio Runner modules. Implement IRunnerMethod to create pipeline methods and IRunnerInjection for dependency injection.</Description>
+    <Description>Core interfaces for creating Zapqio Runner modules. Implement IRunnerMethod to create pipeline methods and IRunnerInjection for dependency injection; use RunnerLog for levelled job logging and JobContext for per-job identifiers.</Description>
     <PackageTags>zapqio;runner;pipeline;automation</PackageTags>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <!--<PackageProjectUrl>https://github.com/zapqio/zapqio</PackageProjectUrl>

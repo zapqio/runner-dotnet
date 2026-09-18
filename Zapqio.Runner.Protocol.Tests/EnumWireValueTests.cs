@@ -63,8 +63,11 @@ public class EnumWireValueTests
         => Assert.Equal($"\"{expected}\"", Serialize(type));
 
     [Theory]
+    [InlineData(MessageLogLevel.Debug, "Debug")]
     [InlineData(MessageLogLevel.Info, "Info")]
+    [InlineData(MessageLogLevel.Warning, "Warning")]
     [InlineData(MessageLogLevel.Error, "Error")]
+    [InlineData(MessageLogLevel.Critical, "Critical")]
     public void Log_level_serializes_to_its_documented_string(MessageLogLevel level, string expected)
         => Assert.Equal($"\"{expected}\"", Serialize(level));
 

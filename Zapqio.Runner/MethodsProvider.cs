@@ -13,6 +13,7 @@ namespace Zapqio.Runner
     {
         private readonly IServiceProvider _localServiceProvider;
         private readonly ILogger<MethodsProvider> _logger;
+        private readonly JobLogWriter _logWriter;
         private readonly DirectoryInfo _dirModules;
         private readonly DirectoryInfo _dirModulesCache;
         private readonly DirectoryInfo? _dirConfig;
@@ -21,8 +22,13 @@ namespace Zapqio.Runner
         private readonly Lazy<IReadOnlyList<IRunnerMethod>> _methods;
         private bool _disposed;
 
-        public MethodsProvider(ILogger<MethodsProvider> logger)
-            : this(logger, DirModules, DirModulesCache, DirConfig)
+        /// <summary>
+        /// Konstruktor hosta - katalogi domyślne, obok binarki. <paramref name="logWriter"/> to ujście
+        /// <c>ILogger</c> wstrzykiwanego do modułów (<see cref="AddModuleLogging"/>); DI podaje go z
+        /// kontenera hosta, gdzie jest singletonem wspólnym ze <see cref="ScopedConsole"/>.
+        /// </summary>
+        public MethodsProvider(ILogger<MethodsProvider> logger, JobLogWriter logWriter)
+                : this(logger, logWriter, DirModules, DirModulesCache, DirConfig)
         {
         }
 
@@ -30,9 +36,10 @@ namespace Zapqio.Runner
         /// Wariant z jawnymi katalogami - dla testów. Host używa domyślnych, obok binarki.
         /// <paramref name="config"/> to katalog na konfigurację modułów (runner go tylko zakłada).
         /// </summary>
-        public MethodsProvider(ILogger<MethodsProvider> logger, DirectoryInfo modules, DirectoryInfo cache, DirectoryInfo? config = null)
+        public MethodsProvider(ILogger<MethodsProvider> logger, JobLogWriter logWriter, DirectoryInfo modules, DirectoryInfo cache, DirectoryInfo? config = null)
         {
             _logger = logger;
+            _logWriter = logWriter ?? throw new ArgumentNullException(nameof(logWriter));
             _dirModules = modules;
             _dirModulesCache = cache;
             _dirConfig = config;
@@ -40,9 +47,31 @@ namespace Zapqio.Runner
             // już przy GetTypes(), nie dopiero przy wywołaniu metody.
             AppDomain.CurrentDomain.AssemblyResolve += ResolveFromSharedModules;
             var serviceCollectionModule = new ServiceCollection();
+            AddModuleLogging(serviceCollectionModule);
             AddModules(serviceCollectionModule);
             _localServiceProvider = serviceCollectionModule.BuildServiceProvider();
             _methods = new Lazy<IReadOnlyList<IRunnerMethod>>(CreateMethods, LazyThreadSafetyMode.ExecutionAndPublication);
+        }
+
+        /// <summary>
+        /// Udostępnia modułom <c>ILogger&lt;T&gt;</c> kierujący do logu zadania. Moduły mają własny,
+        /// odcięty kontener (żeby nie sięgały do wnętrza hosta), więc bez tego nie mają czego
+        /// wstrzyknąć - a samo <c>Console.WriteLine</c> nie pozwala nazwać wagi wpisu.
+        /// </summary>
+        /// <remarks>
+        /// Próg wysyłki pilnuje <see cref="JobLogWriter"/>, dlatego filtr fabryki musi przepuszczać
+        /// wszystko: zostawiony domyślny <c>Information</c> zjadałby wpisy <c>Debug</c>, zanim
+        /// dotarłyby do miejsca, które o progu decyduje. Dostawca jest podpięty TYLKO tutaj - w
+        /// kontenerze hosta zawróciłby własne logi runnera do kolejki wyjściowej.
+        /// </remarks>
+        private void AddModuleLogging(IServiceCollection services)
+        {
+            services.AddLogging(logging =>
+            {
+                logging.ClearProviders();
+                logging.SetMinimumLevel(LogLevel.Trace);
+                logging.AddProvider(new ModuleLoggerProvider(_logWriter));
+            });
         }
 
         /// <summary>

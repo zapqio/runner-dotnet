@@ -63,7 +63,8 @@ public class RunnerReconnectTests
         var pending = new PendingJobReturns();
         var outbox = new Outbox(1000);
         await using var client = new WSClient(settings, NullLogger<WSClient>.Instance,
-            new MethodsProvider(NullLogger<MethodsProvider>.Instance), outbox, process, pending);
+            new MethodsProvider(NullLogger<MethodsProvider>.Instance,
+                new JobLogWriter(outbox, settings, NullLoggerFactory.Instance)), outbox, process, pending);
         using var sender = new OutboundSender(outbox, client, NullLogger<OutboundSender>.Instance);
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

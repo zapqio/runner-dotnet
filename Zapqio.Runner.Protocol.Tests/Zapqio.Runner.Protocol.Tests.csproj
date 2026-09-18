@@ -17,15 +17,18 @@
     <ZapqioProtocolDir Condition="'$(ZapqioProtocolDir)' == ''">$(MSBuildThisFileDirectory)..\protocol\</ZapqioProtocolDir>
   </PropertyGroup>
 
+  <!--
+    The whole protocol repository, linked under a "protocol" folder of this project and copied next
+    to the test binaries. A glob rather than a list: a fixture or document added to the submodule
+    shows up in Solution Explorer and in the output directory by itself, with nothing to add here or
+    in the .slnx (the .slnx format has no globs, so the list kept there was always stale). Only git's
+    own files are excluded; ".git" is a pointer file in a submodule and a directory in a standalone
+    clone, hence the two patterns.
+  -->
   <ItemGroup>
-    <Content Include="$(ZapqioProtocolDir)schemas.json"
-             Link="protocol\schemas.json"
-             CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="$(ZapqioProtocolDir)fixtures\*.json"
-             Link="protocol\fixtures\%(Filename)%(Extension)"
-             CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="$(ZapqioProtocolDir)PROTOCOL.md"
-             Link="protocol\PROTOCOL.md"
+    <Content Include="$(ZapqioProtocolDir)**"
+             Exclude="$(ZapqioProtocolDir).git*;$(ZapqioProtocolDir).git\**"
+             LinkBase="protocol"
              CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

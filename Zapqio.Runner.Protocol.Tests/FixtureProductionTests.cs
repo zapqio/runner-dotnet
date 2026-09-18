@@ -75,6 +75,9 @@ public class FixtureProductionTests
     [Theory]
     [InlineData("log-info.json", MessageLogLevel.Info, "Run Job: 2026-06-12T14:30:00", "2026-06-12T14:30:00.123+00:00")]
     [InlineData("log-error.json", MessageLogLevel.Error, "Main exception: boom", "2026-06-12T14:30:01.456+00:00")]
+    // Poziomy dodane w v3 protokolu (§9).
+    [InlineData("log-debug.json", MessageLogLevel.Debug, "Cache hit: resize-image/800x600", "2026-06-12T14:30:00.456+00:00")]
+    [InlineData("log-warning.json", MessageLogLevel.Warning, "Upstream answered in 4s, over the 2s budget", "2026-06-12T14:30:00.789+00:00")]
     public void Log_frame_matches_the_fixture(string fixture, MessageLogLevel level, string message, string date)
     {
         var frame = Wire.Frame(MessageType.Log, new MessageLog

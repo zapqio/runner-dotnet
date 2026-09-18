@@ -32,12 +32,44 @@ namespace Zapqio.Runner
         /// </summary>
         public int MaxQueuedLogLines { get; set; } = 10_000;
 
+        /// <summary>
+        /// Od jakiej wagi wpisy MODUŁU idą do platformy: <c>Debug</c>, <c>Info</c> (domyślnie),
+        /// <c>Warning</c>, <c>Error</c>, <c>Critical</c>. Wartość spoza listy jest ignorowana - zostaje
+        /// <c>Info</c>, czyli zachowanie sprzed tego ustawienia. Zmienna środowiskowa:
+        /// <c>ZAPQIO_MIN_LOG_LEVEL</c>.
+        /// </summary>
+        /// <remarks>
+        /// Próg obejmuje wszystkie trzy kanały modułu - <c>stdout</c>, <c>stderr</c> i jawnie nazwany
+        /// poziom (<c>RunnerLog</c>, wstrzyknięty <c>ILogger</c>) - i NIE obejmuje wpisów, które runner
+        /// generuje sam. Wiersz startowy zadania musi wyjść niezależnie od progu, bo to on przestawia
+        /// zadanie na <i>Executing</i>; dlaczego, tłumaczy <see cref="JobLogWriter"/>.
+        ///
+        /// <c>Debug</c> jest poniżej domyślnego progu celowo: wpis kosztuje jedną ramkę WebSocket i
+        /// jedno miejsce w <see cref="MaxQueuedLogLines"/>, więc gadatliwy moduł z włączonym Debugiem
+        /// potrafi zapchać kolejkę szybciej, niż nadawca ją opróżni. To ustawienie na czas diagnozy.
+        /// </remarks>
+        public string MinRemoteLogLevel { get; set; } = nameof(Protocol.Enums.MessageLogLevel.Info);
+
+        /// <summary>
+        /// Rozwiązany <see cref="MinRemoteLogLevel"/>. Ustawiane raz, w <see cref="Normalize"/> -
+        /// parsowanie przy każdym wpisie byłoby kosztem na ścieżce gorącej. Bez publicznego settera,
+        /// żeby wiązanie konfiguracji go nie dotykało.
+        /// </summary>
+        public Protocol.Enums.MessageLogLevel RemoteLogThreshold { get; private set; } = Protocol.Enums.MessageLogLevel.Info;
+
         /// <summary>Sprowadza wartości bez sensu do dopuszczalnych; wołane raz, po zbudowaniu ustawień.</summary>
         public void Normalize()
         {
             if (MaxConcurrency < 1) MaxConcurrency = 1;
             if (StopTimeoutSeconds < 0) StopTimeoutSeconds = 0;
             if (MaxQueuedLogLines < 100) MaxQueuedLogLines = 100;
+
+            // Literówka w progu nie może uciszyć logów ani wywrócić startu - wraca domyślne Info.
+            RemoteLogThreshold = Enum.TryParse<Protocol.Enums.MessageLogLevel>(MinRemoteLogLevel, ignoreCase: true, out var threshold)
+                && Enum.IsDefined(threshold)
+                ? threshold
+                : Protocol.Enums.MessageLogLevel.Info;
+            MinRemoteLogLevel = RemoteLogThreshold.ToString();
         }
 
         public class LoggerClass
