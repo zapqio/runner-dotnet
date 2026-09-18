@@ -11,7 +11,7 @@ namespace Zapqio.Runner.Protocol.Tests;
 /// </summary>
 internal static class ProtocolRepo
 {
-    public const string SchemaId = "https://zapqio.dev/protocol/v2/schemas.json";
+    public const string SchemaId = "https://zapqio.dev/protocol/v3/schemas.json";
 
     public static string Dir { get; } = Path.Combine(AppContext.BaseDirectory, "protocol");
 
